@@ -712,7 +712,7 @@ async def dashboard(period: Literal['daily', 'weekly', 'monthly'] = 'monthly',
 # ==================== AI Assistant ====================
 
 SYSTEM_PROMPT = (
-    "You are FarmConnect AI — an expert agriculture assistant for smallholder and commercial farmers. "
+    "You are Farm Hand AI — an expert agriculture assistant for smallholder and commercial farmers. "
     "You help with: crop planning, disease detection from photos, prevention & treatment tips, "
     "profit/investment analysis, market suggestions, product/input recommendations, and general "
     "farm-friend community advice. Be concise, actionable, and grounded. If a photo of a plant, leaf, "
@@ -899,7 +899,7 @@ async def unsubscribe(authorization: Optional[str] = Header(None)):
 
 @api_router.get('/')
 async def root():
-    return {"service": "FarmConnect API", "ok": True}
+    return {"service": "Farm Hand API", "ok": True}
 
 app.include_router(api_router)
 

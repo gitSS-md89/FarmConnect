@@ -66,7 +66,7 @@ export default function Assistant() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <ScreenHeader testID="assistant-header" title="AI Assistant" subtitle="Powered by Gemini 3 Pro" />
+      <ScreenHeader testID="assistant-header" title="AI Assistant" subtitle="Farm Hand AI • Gemini 3 Pro" />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 60 : 0}
@@ -86,7 +86,7 @@ export default function Assistant() {
                 }}>
                   <Ionicons name="sparkles" size={28} color={colors.onBrandTertiary} />
                 </View>
-                <Text style={{ color: colors.onSurface, fontSize: 20, fontWeight: '800' }}>Hi, I&apos;m FarmConnect AI</Text>
+                <Text style={{ color: colors.onSurface, fontSize: 20, fontWeight: '800' }}>Hi, I&apos;m Farm Hand AI</Text>
                 <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
                   Ask me about your farm, upload a plant photo for disease detection, or get profit insights.
                 </Text>

@@ -1,4 +1,4 @@
-# FarmConnect – Farm Management System (PRD)
+# Farm Hand – Farm Management System (PRD)
 
 ## Overview
 Mobile-first (Expo, iOS + Android) farm management platform with AI-powered insights.

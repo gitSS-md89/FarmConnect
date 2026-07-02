@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
-  ActivityIndicator, ImageBackground,
+  ActivityIndicator, Image,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -51,15 +50,6 @@ export default function AuthScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1494187570835-b188e7f0f26e?w=1200' }}
-        style={{ height: 260 }}
-      >
-        <LinearGradient
-          colors={['rgba(0,0,0,0.15)', mode === 'dark' ? '#121614' : '#F9FAF8']}
-          style={{ flex: 1 }}
-        />
-      </ImageBackground>
       <Pressable
         testID="theme-toggle"
         onPress={toggle}
@@ -68,12 +58,17 @@ export default function AuthScreen() {
         <Ionicons name={mode === 'dark' ? 'sunny' : 'moon'} size={18} color={colors.onSurface} />
       </Pressable>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, marginTop: -64 }}>
-        <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-          <Text style={{ fontSize: 34, fontWeight: '800', color: colors.onSurface }}>FarmConnect</Text>
-          <Text style={{ fontSize: 15, color: colors.muted, marginTop: 6 }}>
-            Smart farm management with AI insights
-          </Text>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: insets.top + 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+          <View style={{ alignItems: 'center', marginTop: 20, marginBottom: 12 }}>
+            <Image
+              testID="brand-logo"
+              source={require('@/assets/images/farmhand-emblem.png')}
+              style={{ width: 140, height: 140, resizeMode: 'contain' }}
+            />
+            <Text style={{ fontSize: 32, fontWeight: '800', color: colors.onSurface, marginTop: 8, letterSpacing: 0.5 }}>Farm Hand</Text>
+            <Text style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>Farm Management System</Text>
+          </View>
 
           <View style={[styles.tabRow, { backgroundColor: colors.surfaceTertiary }]}>
             {(['login', 'signup'] as const).map(t => (
