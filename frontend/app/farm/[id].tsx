@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { api } from '@/src/lib/api';
-import { fmt, symbol, detectCurrency, POPULAR_CURRENCIES, CURRENCY_SYMBOLS } from '@/src/lib/currency';
+import { fmt, symbol, detectCurrency, POPULAR_CURRENCIES, CURRENCY_SYMBOLS, UNITS } from '@/src/lib/currency';
 import { ScreenHeader, Card, PrimaryButton } from '@/src/ui/components';
 
 type Tab = 'produce' | 'sales' | 'invest' | 'sellers';
@@ -26,6 +26,7 @@ export default function FarmDetail() {
   const [sellers, setSellers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalTab, setModalTab] = useState<Tab | null>(null);
+  const [showFarmSettings, setShowFarmSettings] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,6 +76,9 @@ export default function FarmDetail() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable testID="back-btn" onPress={() => router.back()} style={[s.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name="arrow-back" size={18} color={colors.onSurface} />
+            </Pressable>
+            <Pressable testID="farm-settings-btn" onPress={() => setShowFarmSettings(true)} style={[s.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
+              <Ionicons name="settings-outline" size={18} color={colors.onSurface} />
             </Pressable>
             <Pressable testID="delete-farm-btn" onPress={deleteFarm} style={[s.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name="trash" size={16} color={colors.error} />
@@ -133,19 +137,29 @@ export default function FarmDetail() {
         {loading ? <ActivityIndicator color={colors.brand} style={{ marginTop: 30 }} /> : (
           <View style={{ marginTop: 16 }}>
             {tab === 'produce' && (produce.length === 0 ? <Empty text="No produce yet" /> :
-              produce.map(p => (
-                <Card key={p.produce_id} testID={`produce-${p.produce_id}`} style={{ marginBottom: 10 }}>
-                  <Row
-                    title={p.name}
-                    subtitle={p.category}
-                    right={`${p.quantity} ${p.unit}`}
-                    colors={colors}
-                  />
-                  {Number(p.quantity || 0) === 0 && (
-                    <Text testID={`out-of-stock-${p.produce_id}`} style={{ color: colors.error, fontSize: 12, marginTop: 6, fontWeight: '600' }}>Out of stock</Text>
-                  )}
-                </Card>
-              )))}
+              produce.map(p => {
+                const isLow = Number(p.low_stock_threshold || 0) > 0 && Number(p.quantity || 0) <= Number(p.low_stock_threshold || 0);
+                return (
+                  <Card key={p.produce_id} testID={`produce-${p.produce_id}`} style={{ marginBottom: 10 }}>
+                    <Row
+                      title={p.name}
+                      subtitle={p.category}
+                      right={`${p.quantity} ${p.unit}`}
+                      colors={colors}
+                    />
+                    {Number(p.quantity || 0) === 0 ? (
+                      <Text testID={`out-of-stock-${p.produce_id}`} style={{ color: colors.error, fontSize: 12, marginTop: 6, fontWeight: '600' }}>Out of stock</Text>
+                    ) : isLow ? (
+                      <View testID={`low-stock-${p.produce_id}`} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                        <Ionicons name="warning" size={14} color={colors.warning} />
+                        <Text style={{ color: colors.warning, fontSize: 12, marginLeft: 4, fontWeight: '600' }}>
+                          Low stock — restock soon (threshold {p.low_stock_threshold} {p.unit})
+                        </Text>
+                      </View>
+                    ) : null}
+                  </Card>
+                );
+              }))}
             {tab === 'sales' && (sales.length === 0 ? <Empty text="No sales yet" /> :
               sales.map(sale => (
                 <Card key={sale.sale_id} testID={`sale-${sale.sale_id}`} style={{ marginBottom: 10 }}>
@@ -160,7 +174,7 @@ export default function FarmDetail() {
             {tab === 'invest' && (invests.length === 0 ? <Empty text="No investments yet" /> :
               invests.map(i => (
                 <Card key={i.investment_id} testID={`invest-${i.investment_id}`} style={{ marginBottom: 10 }}>
-                  <Row title={i.category} subtitle={i.description || ''} right={fmt(i.amount, 'USD')} colors={colors} />
+                  <Row title={i.category} subtitle={i.description || ''} right={fmt(i.amount, i.currency || farm?.currency || 'USD')} colors={colors} />
                 </Card>
               )))}
             {tab === 'sellers' && (sellers.length === 0 ? (
@@ -210,8 +224,16 @@ export default function FarmDetail() {
         section={modalTab}
         onClose={() => setModalTab(null)}
         farmId={id!}
+        farm={farm}
         produce={produce}
         sellers={sellers}
+        onSaved={load}
+      />
+
+      <FarmSettingsModal
+        visible={showFarmSettings}
+        farm={farm}
+        onClose={() => setShowFarmSettings(false)}
         onSaved={load}
       />
     </View>
@@ -249,7 +271,7 @@ function Row({ title, subtitle, right, colors }: any) {
   );
 }
 
-function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved }: any) {
+function AddModal({ visible, section, onClose, farmId, farm, produce, sellers, onSaved }: any) {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -257,18 +279,20 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
   const [newSeller, setNewSeller] = useState({ name: '', contact: '', location: '' });
   const [savingSeller, setSavingSeller] = useState(false);
   const [currencyChoice, setCurrencyChoice] = useState<string | null>(null);
+  const [investCurrency, setInvestCurrency] = useState<string | null>(null);
   // Common fields for various sections
-  const [f, setF] = useState<any>({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
+  const [f, setF] = useState<any>({ name: '', quantity: '', unit: '', low_stock_threshold: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
 
   React.useEffect(() => {
     if (visible) {
-      setF({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
+      setF({ name: '', quantity: '', unit: farm?.default_unit || '', low_stock_threshold: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
       setErr(null);
       setShowSellerForm(section === 'sales' && sellers.length === 0);
       setNewSeller({ name: '', contact: '', location: '' });
       setCurrencyChoice(null);
+      setInvestCurrency(farm?.currency || 'USD');
     }
-  }, [visible, section, sellers.length]);
+  }, [visible, section, sellers.length, farm]);
 
   // Selected entities (for sale)
   const selectedProduce = produce.find((p: any) => p.produce_id === f.produce_id);
@@ -340,7 +364,9 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
       } else if (section === 'invest') {
         if (!f.category || !f.amount) throw new Error('Category & amount are required');
         await api('/investments', { method: 'POST', body: JSON.stringify({
-          farm_id: farmId, category: f.category, amount: parseFloat(f.amount), description: f.description,
+          farm_id: farmId, category: f.category, amount: parseFloat(f.amount),
+          currency: investCurrency || farm?.currency || 'USD',
+          description: f.description,
         })});
       } else if (section === 'sellers') {
         if (!f.name) throw new Error('Seller name is required');
@@ -532,7 +558,30 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
             {section === 'invest' && (
               <>
                 <Chips label="Category*" options={INVEST_CATS} value={f.category} onChange={(v: string) => set('category', v)} testIdPrefix="inv-cat" />
-                <Field label="Amount*" testID="in-amount" value={f.amount} onChangeText={(v: string) => set('amount', v)} keyboardType="decimal-pad" />
+                <Field label={`Amount* (${symbol(investCurrency)}${investCurrency})`} testID="in-amount" value={f.amount} onChangeText={(v: string) => set('amount', v)} keyboardType="decimal-pad" />
+                <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 12, marginBottom: 6 }}>Currency (farm default: {farm?.currency || 'USD'})</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+                  {POPULAR_CURRENCIES.map(c => {
+                    const selected = investCurrency === c;
+                    return (
+                      <Pressable
+                        key={c}
+                        testID={`invest-currency-${c}`}
+                        onPress={() => setInvestCurrency(c)}
+                        style={{
+                          paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                          alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                          borderColor: selected ? colors.brandPrimary : colors.border,
+                        }}
+                      >
+                        <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>
+                          {CURRENCY_SYMBOLS[c]} {c}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
                 <Field label="Description" testID="in-desc" value={f.description} onChangeText={(v: string) => set('description', v)} />
               </>
             )}
@@ -595,6 +644,136 @@ function Chips({ label, options, value, onChange, testIdPrefix }: any) {
           </Pressable>
         ))}
       </ScrollView>
+    </View>
+  );
+}
+
+function FarmSettingsModal({ visible, farm, onClose, onSaved }: any) {
+  const { colors } = useTheme();
+  const [name, setName] = useState('');
+  const [location, setLocation] = useState('');
+  const [size, setSize] = useState('');
+  const [currency, setCurrency] = useState<string | null>(null);
+  const [unit, setUnit] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (visible && farm) {
+      setName(farm.name || '');
+      setLocation(farm.location || '');
+      setSize(farm.size_acres ? String(farm.size_acres) : '');
+      setCurrency(farm.currency || null);
+      setUnit(farm.default_unit || null);
+      setErr(null);
+    }
+  }, [visible, farm]);
+
+  const save = async () => {
+    setErr(null); setBusy(true);
+    try {
+      const payload: any = {};
+      if (name.trim() && name.trim() !== farm.name) payload.name = name.trim();
+      if (location.trim() !== (farm.location || '')) payload.location = location.trim();
+      if (size !== (farm.size_acres ? String(farm.size_acres) : '')) payload.size_acres = size ? parseFloat(size) : null;
+      if (currency && currency !== farm.currency) payload.currency = currency;
+      if (unit && unit !== farm.default_unit) payload.default_unit = unit;
+      if (Object.keys(payload).length === 0) { onClose(); return; }
+      await api(`/farms/${farm.farm_id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      await onSaved();
+      onClose();
+    } catch (e: any) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (!farm) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+        <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' }}>
+          <View style={{ alignItems: 'center', marginBottom: 12 }}>
+            <View style={{ width: 40, height: 4, backgroundColor: colors.border, borderRadius: 2 }} />
+          </View>
+          <Text style={{ color: colors.onSurface, fontSize: 22, fontWeight: '800' }}>Farm Settings</Text>
+          <Text style={{ color: colors.muted, marginTop: 4 }}>Currency, units and profile for this farm</Text>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ marginTop: 8 }}>
+            <SettingsField label="Name*" testID="fs-name" value={name} onChangeText={setName} />
+            <SettingsField label="Location" testID="fs-location" value={location} onChangeText={setLocation} placeholder="e.g. Punjab, India" />
+            <SettingsField label="Size (acres)" testID="fs-size" value={size} onChangeText={setSize} keyboardType="decimal-pad" />
+
+            <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 6 }}>Currency</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+              {POPULAR_CURRENCIES.map(c => {
+                const selected = currency === c;
+                return (
+                  <Pressable
+                    key={c}
+                    testID={`fs-currency-${c}`}
+                    onPress={() => setCurrency(c)}
+                    style={{
+                      paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                      alignItems: 'center', justifyContent: 'center',
+                      backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                      borderColor: selected ? colors.brandPrimary : colors.border,
+                    }}
+                  >
+                    <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>
+                      {CURRENCY_SYMBOLS[c]} {c}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 6 }}>Default Unit</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+              {UNITS.map(u => {
+                const selected = unit === u;
+                return (
+                  <Pressable
+                    key={u}
+                    testID={`fs-unit-${u}`}
+                    onPress={() => setUnit(u)}
+                    style={{
+                      paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                      alignItems: 'center', justifyContent: 'center',
+                      backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                      borderColor: selected ? colors.brandPrimary : colors.border,
+                    }}
+                  >
+                    <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>{u}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {err && <Text style={{ color: colors.error, marginTop: 10 }}>{err}</Text>}
+          </ScrollView>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+            <Pressable testID="fs-cancel" onPress={onClose} style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
+              <Text style={{ color: colors.onSurface, fontWeight: '600' }}>Cancel</Text>
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton testID="fs-save" label={busy ? 'Saving...' : 'Save'} onPress={save} disabled={busy} />
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function SettingsField({ label, ...rest }: any) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ marginTop: 12 }}>
+      <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>{label}</Text>
+      <TextInput
+        placeholderTextColor={colors.muted}
+        style={{ backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.onSurface }}
+        {...rest}
+      />
     </View>
   );
 }

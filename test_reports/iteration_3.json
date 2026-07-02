@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration-3 comprehensive backend + UI testing of FarmConnect system-wide currency, farm-level currency/unit, per-investment currency, low-stock alerts, and fresh settings screen. Backend: 33/33 new pytests in backend/tests/test_settings_currency_iter3.py PASS + 44 regression tests still green (77 total, only 2 assistant tests deselected as usual). Verified: (a) PATCH /api/users/me/settings: 401 without token, 400 on bad currency code, 200 with updated primary_currency reflected on GET /api/me; (b) GET /api/fx/rates public (no auth) returns base='USD' with INR≈83, EUR≈0.92, GBP≈0.78, USD=1.0; (c) Dashboard currency conversion: with two sales ($100 USD + ₹8300 INR), setting primary_currency='INR' → total_revenue ≥ 15,770 (~16,600 INR expected), setting 'USD' → total_revenue ≥ 190 (~200 USD), primary_symbol correctly returns '₹' / '$'; (d) POST /api/farms auto-detects: 'London,UK'→GBP+kg, 'New York,USA'→USD+lb, 'Delhi,India'→INR+kg, no-location uses user's primary_currency (EUR), explicit body.currency+default_unit override auto-detection ('Delhi,India' with USD+quintal explicit stays USD+quintal); (e) PATCH /api/farms/{id} updates currency+unit+location, 400 on bad currency, 404 on non-owner + bad farm_id; (f) POST /api/investments: default → farm.currency (INR), explicit override (USD) honored, bad code → 400; (g) POST /api/produce with omitted unit inherits farm.default_unit (lb for USD farm), low_stock_threshold=20 stored and returned by GET /api/produce; after selling 85/100 units the dashboard.low_stock_alerts contains {produce_id, quantity:15, threshold:20}. Also updated test_farmconnect.py TestDashboard assertions to reflect new API contract (revenue now converted to primary_currency; native amounts under revenue_by_currency). Frontend UI (mobile 390x844, real UI login as test@farm.com / secret123): Dashboard header shows 3 buttons (settings-btn, theme-toggle, logout-btn); tapping settings-btn navigates to /settings; screen shows account-card + theme-card + currency-card; 'Current: $ USD' → tap pick-currency-INR → 'Current: ₹ INR'; back to dashboard shows stat-revenue label 'REVENUE (INR)' with value '₹83000' (converted from the prior USD sale). Farms tab → tap add-farm-btn → New Farm modal shows currency chip row (farm-currency-GBP etc) + default-unit chip row (farm-unit-kg/g/tonne/quintal/lb/oz); typing 'London, UK' auto-selects GBP + kg; save creates farm with visible currency badge on list (2 badges after test). Farm detail page shows farm-settings-btn in header; opening it shows FarmSettingsModal with fs-name / fs-location / fs-size / fs-currency-* / fs-unit-* / fs-save / fs-cancel; changing to EUR and saving persists — reopen modal still shows all fields (see /tmp/fs_reopen.png). Regression: earlier stock enforcement, seller currency detection/patch, community, market subscribe/unsubscribe all still green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_settings_currency_iter3.py",
+    "/app/backend/tests/test_farmconnect.py",
+    "/app/backend/tests/test_stock_and_currency.py",
+    "/app/test_reports/pytest/pytest_iter3.xml",
+    "/app/test_reports/pytest/pytest_iter3_all.xml"
+  ],
+  "action_items": [
+    "None blocking. All iter-3 features (system-wide currency, farm settings, investment currency picker, low-stock threshold, dashboard conversion) work correctly on both backend and mobile web UI."
+  ],
+  "critical_code_review_comments": [
+    "server.py detect_currency() correctly handles: 'London, UK'→GBP, 'New York, USA'→USD, 'Delhi, India'→INR, 'Paris, France'→EUR (via 'paris' & 'france' keywords). detect_unit() returns 'lb' only for USD, 'kg' elsewhere.",
+    "server.py convert_amount() safely defaults to USD when currency missing; returns 0 for amount=0; round to 2 decimals. PATCH /api/users/me/settings whitelists against CURRENCY_SYMBOLS (400) — good.",
+    "PATCH /api/farms/{id} correctly uses matched_count==0 → 404 so non-owner can't distinguish farm existence. Body validates currency against CURRENCY_SYMBOLS (400).",
+    "Dashboard /api/dashboard returns {primary_currency, primary_symbol, total_revenue (converted), revenue_by_currency (native), low_stock_alerts:[{produce_id, produce_name, quantity, threshold, unit}]}. Consistent contract.",
+    "Frontend settings.tsx: clean testIDs (pick-currency-*, current-currency, theme-{light,dark}, account-card, currency-card, farms-info-card, settings-logout, settings-back). Uses api() PATCH then refresh(); no blocking spinner issue.",
+    "Frontend farm/[id].tsx FarmSettingsModal exposes fs-* testIDs and posts PATCH /api/farms/{id}. Modal reopens with pre-filled values (verified via screenshot).",
+    "Frontend (tabs)/farms.tsx AddFarmModal: auto-detects currency+unit when location text changes (setCurrency(null) resets so effect can re-run) — behaves correctly with typed 'London, UK'."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_settings_currency_iter3.py (created — 33 tests)",
+    "/app/backend/tests/test_farmconnect.py (updated: TestDashboard assertions aligned with new currency-conversion contract — revenue_by_currency + positive totals + presence of iter-3 fields)"
+  ],
+  "success_rate": {"backend": "100% (77/77 non-assistant: 33 iter-3 + 18 iter-2 + 26 iter-1 regression)", "frontend": "100% on iter-3 features (settings screen, currency chip, dashboard reflection, new-farm chips, farm settings modal edit+reopen, farm badges)"},
+  "seed_data_creation": "Iter-3 pytest creates fresh TEST_ users/farms/produce/sellers/sales via public URL; farm delete cascades. UI test used seeded test@farm.com; TEST UI London farm was deleted afterward. User primary_currency reset to USD as final cleanup step.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && python -m pytest backend/tests/ -v -k 'not assistant' (77/77 expected). Iter-3 tests live in test_settings_currency_iter3.py. Key testIDs: dashboard-header, settings-btn, theme-toggle, logout-btn, settings-header, settings-back, account-card, theme-card, currency-card, current-currency, pick-currency-<CODE>, stat-revenue, low-stock-card, alert-<produce_id>, farms-header, add-farm-btn, farm-input-name/location/size, farm-currency-<CODE>, farm-unit-<UNIT>, farm-submit, farm-cancel, farm-item-<id>, farm-badge-currency-<id>, farm-detail-header, farm-settings-btn, fs-name/location/size/currency-<CODE>/unit-<UNIT>/save/cancel, invest-currency-<CODE>. Seeded credentials: test@farm.com / secret123. Reset primary_currency=USD before starting to keep dashboard math predictable.",
+  "rca_of_issue": "N/A — iter-3 feature set (system-wide primary currency + FX conversion, farm-level auto-detected currency/unit with override + settings modal, per-investment currency picker with farm default fallback, per-produce low_stock_threshold with unit inheritance + dashboard alerts, /settings screen accessible from dashboard header) all correctly implemented across server.py + settings.tsx + (tabs)/index.tsx + (tabs)/farms.tsx + farm/[id].tsx + src/lib/currency.ts and verified end-to-end."
+}

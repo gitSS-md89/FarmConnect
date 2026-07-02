@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { api } from '@/src/lib/api';
-import { fmt as _fmt, symbol } from '@/src/lib/currency';
+import { symbol } from '@/src/lib/currency';
 import { ScreenHeader, Card } from '@/src/ui/components';
 
 type Period = 'daily' | 'weekly' | 'monthly';
@@ -30,6 +30,7 @@ export default function Dashboard() {
   useFocusEffect(useCallback(() => { load(period); }, [load, period]));
 
   const doLogout = async () => { await logout(); router.replace('/auth'); };
+  const sym = data?.primary_symbol || '$';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -39,6 +40,9 @@ export default function Dashboard() {
         subtitle="Your farm at a glance"
         right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable testID="settings-btn" onPress={() => router.push('/settings')} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
+              <Ionicons name="settings-outline" size={18} color={colors.onSurface} />
+            </Pressable>
             <Pressable testID="theme-toggle" onPress={toggle} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name={mode === 'dark' ? 'sunny' : 'moon'} size={18} color={colors.onSurface} />
             </Pressable>
@@ -77,13 +81,31 @@ export default function Dashboard() {
         ) : (
           <>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-              <StatCard label="Revenue" value={`$${data?.total_revenue ?? 0}`} accent={colors.brand} testID="stat-revenue" />
-              <StatCard label="Investment" value={`$${data?.total_investment ?? 0}`} accent={colors.warning} testID="stat-investment" />
+              <StatCard label={`Revenue (${data?.primary_currency || 'USD'})`} value={`${sym}${data?.total_revenue ?? 0}`} accent={colors.brand} testID="stat-revenue" />
+              <StatCard label="Investment" value={`${sym}${data?.total_investment ?? 0}`} accent={colors.warning} testID="stat-investment" />
             </View>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
-              <StatCard label="Profit" value={`$${data?.profit ?? 0}`} accent={(data?.profit ?? 0) >= 0 ? colors.success : colors.error} testID="stat-profit" />
-              <StatCard label="Avg Rate" value={`$${data?.avg_rate ?? 0}`} accent={colors.info} testID="stat-avg-rate" />
+              <StatCard label="Profit" value={`${sym}${data?.profit ?? 0}`} accent={(data?.profit ?? 0) >= 0 ? colors.success : colors.error} testID="stat-profit" />
+              <StatCard label="Avg Rate" value={`${sym}${data?.avg_rate ?? 0}`} accent={colors.info} testID="stat-avg-rate" />
             </View>
+
+            {(data?.low_stock_alerts?.length || 0) > 0 && (
+              <Card style={{ marginTop: 16, borderColor: colors.warning }} testID="low-stock-card">
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="warning" size={18} color={colors.warning} />
+                  <Text style={{ color: colors.warning, fontWeight: '700', marginLeft: 8 }}>LOW STOCK ALERTS</Text>
+                </View>
+                {data.low_stock_alerts.map((a: any) => (
+                  <View key={a.produce_id} testID={`alert-${a.produce_id}`} style={{
+                    flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8,
+                    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+                  }}>
+                    <Text style={{ color: colors.onSurface, fontWeight: '600' }}>{a.name}</Text>
+                    <Text style={{ color: colors.warning, fontWeight: '700' }}>{a.quantity} / {a.threshold} {a.unit}</Text>
+                  </View>
+                ))}
+              </Card>
+            )}
 
             {Object.keys(data?.revenue_by_currency || {}).length > 1 && (
               <Card style={{ marginTop: 16 }} testID="card-revenue-currency">
@@ -103,20 +125,20 @@ export default function Dashboard() {
             </Card>
 
             <Card style={{ marginTop: 16 }} testID="card-sales-cat">
-              <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>SALES BY CATEGORY</Text>
+              <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>SALES BY CATEGORY ({data?.primary_currency || 'USD'})</Text>
               {Object.keys(data?.sales_by_category || {}).length === 0
                 ? <Text style={{ color: colors.muted }}>No sales yet.</Text>
                 : Object.entries(data.sales_by_category).map(([k, v]: any, i, arr) => (
-                    <Row key={k} label={k} value={`$${v}`} colors={colors} last={i === arr.length - 1} />
+                    <Row key={k} label={k} value={`${sym}${v}`} colors={colors} last={i === arr.length - 1} />
                   ))}
             </Card>
 
             <Card style={{ marginTop: 16 }} testID="card-invest-cat">
-              <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>INVESTMENTS BY CATEGORY</Text>
+              <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>INVESTMENTS BY CATEGORY ({data?.primary_currency || 'USD'})</Text>
               {Object.keys(data?.investment_by_category || {}).length === 0
                 ? <Text style={{ color: colors.muted }}>No investments yet.</Text>
                 : Object.entries(data.investment_by_category).map(([k, v]: any, i, arr) => (
-                    <Row key={k} label={k} value={`$${v}`} colors={colors} last={i === arr.length - 1} />
+                    <Row key={k} label={k} value={`${sym}${v}`} colors={colors} last={i === arr.length - 1} />
                   ))}
             </Card>
           </>

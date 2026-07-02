@@ -108,13 +108,27 @@ class FarmIn(BaseModel):
     location: Optional[str] = None
     size_acres: Optional[float] = None
     description: Optional[str] = None
+    currency: Optional[str] = None       # override auto-detect
+    default_unit: Optional[str] = None   # override auto-detect
+
+class FarmUpdateIn(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    size_acres: Optional[float] = None
+    description: Optional[str] = None
+    currency: Optional[str] = None
+    default_unit: Optional[str] = None
+
+class UserSettingsIn(BaseModel):
+    primary_currency: Optional[str] = None
 
 class ProduceIn(BaseModel):
     farm_id: str
     name: str
     category: str  # e.g. Grain, Vegetable, Fruit, Dairy
     quantity: float
-    unit: str = 'kg'
+    unit: Optional[str] = None  # inherits farm.default_unit if None
+    low_stock_threshold: Optional[float] = 0
     notes: Optional[str] = None
 
 class SellerIn(BaseModel):
@@ -138,6 +152,7 @@ class InvestmentIn(BaseModel):
     farm_id: str
     category: str  # Seeds, Fertilizer, Labour, Equipment, Irrigation, Other
     amount: float
+    currency: Optional[str] = None  # defaults to farm's currency
     description: Optional[str] = None
 
 class PostIn(BaseModel):
@@ -214,9 +229,48 @@ def detect_currency(location: Optional[str]) -> Optional[str]:
                 return code
     return None
 
+# Approximate FX rates: base = USD. Rate = how many <CUR> per 1 USD.
+FX_RATES_PER_USD = {
+    "USD": 1.0, "INR": 83.0, "EUR": 0.92, "GBP": 0.78, "JPY": 150.0,
+    "CNY": 7.2, "AUD": 1.53, "CAD": 1.35, "SGD": 1.34, "AED": 3.67,
+    "BRL": 5.0, "ZAR": 18.5, "MXN": 17.0, "NGN": 1500.0, "KES": 130.0,
+    "PKR": 280.0, "BDT": 110.0, "LKR": 300.0, "NPR": 133.0, "IDR": 15700.0,
+    "MYR": 4.7, "THB": 35.0, "PHP": 56.0, "VND": 24500.0, "CHF": 0.88,
+    "SEK": 10.5, "NOK": 10.7, "DKK": 6.85, "PLN": 4.0, "TRY": 32.0,
+    "RUB": 90.0, "SAR": 3.75, "EGP": 48.0, "GHS": 12.0,
+}
+
+def convert_amount(amount: float, from_cur: Optional[str], to_cur: Optional[str]) -> float:
+    if not amount:
+        return 0.0
+    f = (from_cur or "USD").upper()
+    t = (to_cur or "USD").upper()
+    if f == t:
+        return round(amount, 2)
+    fr = FX_RATES_PER_USD.get(f)
+    tr = FX_RATES_PER_USD.get(t)
+    if fr is None or tr is None:
+        return round(amount, 2)
+    usd = amount / fr
+    return round(usd * tr, 2)
+
+# Default units mapping. kg is nearly universal for agriculture.
+UNIT_BY_CURRENCY = {
+    "USD": "lb",   # US commonly uses pounds for produce retail
+}
+def detect_unit(location: Optional[str], currency: Optional[str]) -> str:
+    # Prefer explicit US lb if in US; otherwise metric kg
+    if currency and currency in UNIT_BY_CURRENCY:
+        return UNIT_BY_CURRENCY[currency]
+    return "kg"
+
 @api_router.get('/currencies')
 async def list_currencies():
     return [{"code": c, "symbol": s} for c, s in CURRENCY_SYMBOLS.items()]
+
+@api_router.get('/fx/rates')
+async def fx_rates():
+    return {"base": "USD", "rates": FX_RATES_PER_USD, "note": "Approximate reference rates."}
 
 # ==================== Startup ====================
 
@@ -246,6 +300,7 @@ async def register(body: RegisterIn):
         "password_hash": hash_password(body.password),
         "provider": "email",
         "picture": None,
+        "primary_currency": "USD",
         "subscription": {"active": False, "plan": None, "renews_at": None},
         "created_at": now_utc(),
     }
@@ -292,6 +347,7 @@ async def google_session(body: GoogleSessionIn):
             "picture": picture,
             "provider": "google",
             "password_hash": None,
+            "primary_currency": "USD",
             "subscription": {"active": False, "plan": None, "renews_at": None},
             "created_at": now_utc(),
         })
@@ -317,12 +373,28 @@ async def logout(authorization: Optional[str] = Header(None)):
         await db.user_sessions.delete_one({"session_token": token})
     return {"ok": True}
 
+@api_router.patch('/users/me/settings')
+async def update_user_settings(body: UserSettingsIn, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    updates: dict = {}
+    if body.primary_currency is not None:
+        if body.primary_currency not in CURRENCY_SYMBOLS:
+            raise HTTPException(400, 'Unsupported currency')
+        updates['primary_currency'] = body.primary_currency
+    if not updates:
+        raise HTTPException(400, 'No changes provided')
+    await db.users.update_one({"user_id": user['user_id']}, {"$set": updates})
+    fresh = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "password_hash": 0})
+    return fresh
+
 # ==================== Farms ====================
 
 @api_router.post('/farms')
 async def create_farm(body: FarmIn, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     farm_id = uid('f')
+    currency = body.currency or detect_currency(body.location) or user.get('primary_currency', 'USD')
+    default_unit = body.default_unit or detect_unit(body.location, currency)
     doc = {
         "farm_id": farm_id,
         "owner_id": user['user_id'],
@@ -330,11 +402,29 @@ async def create_farm(body: FarmIn, authorization: Optional[str] = Header(None))
         "location": body.location,
         "size_acres": body.size_acres,
         "description": body.description,
+        "currency": currency,
+        "default_unit": default_unit,
         "created_at": now_utc(),
     }
     await db.farms.insert_one(doc)
     doc.pop('_id', None)
     return doc
+
+@api_router.patch('/farms/{farm_id}')
+async def update_farm(farm_id: str, body: FarmUpdateIn, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    updates: dict = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    if 'currency' in updates and updates['currency'] not in CURRENCY_SYMBOLS:
+        raise HTTPException(400, 'Unsupported currency')
+    if not updates:
+        raise HTTPException(400, 'No changes provided')
+    r = await db.farms.update_one(
+        {"farm_id": farm_id, "owner_id": user['user_id']},
+        {"$set": updates},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, 'Farm not found')
+    return await db.farms.find_one({"farm_id": farm_id}, {"_id": 0})
 
 @api_router.get('/farms')
 async def list_farms(authorization: Optional[str] = Header(None)):
@@ -361,6 +451,7 @@ async def create_produce(body: ProduceIn, authorization: Optional[str] = Header(
     farm = await db.farms.find_one({"farm_id": body.farm_id, "owner_id": user['user_id']}, {"_id": 0})
     if not farm:
         raise HTTPException(404, 'Farm not found')
+    unit = body.unit or farm.get('default_unit', 'kg')
     doc = {
         "produce_id": uid('p'),
         "farm_id": body.farm_id,
@@ -368,7 +459,8 @@ async def create_produce(body: ProduceIn, authorization: Optional[str] = Header(
         "name": body.name,
         "category": body.category,
         "quantity": body.quantity,
-        "unit": body.unit,
+        "unit": unit,
+        "low_stock_threshold": float(body.low_stock_threshold or 0),
         "notes": body.notes,
         "created_at": now_utc(),
     }
@@ -505,12 +597,19 @@ async def list_sales(farm_id: Optional[str] = None, authorization: Optional[str]
 @api_router.post('/investments')
 async def create_investment(body: InvestmentIn, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    farm = await db.farms.find_one({"farm_id": body.farm_id, "owner_id": user['user_id']}, {"_id": 0})
+    if not farm:
+        raise HTTPException(404, 'Farm not found')
+    currency = body.currency or farm.get('currency') or user.get('primary_currency', 'USD')
+    if currency not in CURRENCY_SYMBOLS:
+        raise HTTPException(400, 'Unsupported currency')
     doc = {
         "investment_id": uid('i'),
         "owner_id": user['user_id'],
         "farm_id": body.farm_id,
         "category": body.category,
         "amount": body.amount,
+        "currency": currency,
         "description": body.description,
         "invested_at": now_utc(),
     }
@@ -542,38 +641,60 @@ async def dashboard(period: Literal['daily', 'weekly', 'monthly'] = 'monthly',
         start = now - timedelta(days=30)
 
     owner = user['user_id']
+    target = user.get('primary_currency', 'USD')
+
     sales = await db.sales.find({"owner_id": owner, "sold_at": {"$gte": start}}, {"_id": 0}).to_list(1000)
     invests = await db.investments.find({"owner_id": owner, "invested_at": {"$gte": start}}, {"_id": 0}).to_list(1000)
     produce = await db.produce.find({"owner_id": owner}, {"_id": 0}).to_list(1000)
 
-    total_revenue = sum(s.get('total', 0) for s in sales)
-    total_investment = sum(i.get('amount', 0) for i in invests)
+    # Convert to target
+    total_revenue = sum(convert_amount(s.get('total', 0), s.get('currency', 'USD'), target) for s in sales)
+    total_investment = sum(convert_amount(i.get('amount', 0), i.get('currency', 'USD'), target) for i in invests)
     profit = round(total_revenue - total_investment, 2)
     total_quantity_sold = sum(s.get('quantity', 0) for s in sales)
     total_quantity_stock = sum(p.get('quantity', 0) for p in produce)
     avg_rate = round(total_revenue / total_quantity_sold, 2) if total_quantity_sold > 0 else 0
 
-    # By category (sales)
-    by_category = {}
+    # By category (sales) — converted
+    by_category: dict = {}
     for s in sales:
         prod = next((p for p in produce if p.get('produce_id') == s.get('produce_id')), None)
         cat = prod.get('category', 'Other') if prod else 'Other'
-        by_category[cat] = round(by_category.get(cat, 0) + s.get('total', 0), 2)
+        conv = convert_amount(s.get('total', 0), s.get('currency', 'USD'), target)
+        by_category[cat] = round(by_category.get(cat, 0) + conv, 2)
 
-    # Investment by category
-    invest_by_cat = {}
+    # Investment by category — converted
+    invest_by_cat: dict = {}
     for i in invests:
         c = i.get('category', 'Other')
-        invest_by_cat[c] = round(invest_by_cat.get(c, 0) + i.get('amount', 0), 2)
+        conv = convert_amount(i.get('amount', 0), i.get('currency', 'USD'), target)
+        invest_by_cat[c] = round(invest_by_cat.get(c, 0) + conv, 2)
 
-    # Revenue by currency
+    # Native revenue by currency (unconverted, for reference)
     revenue_by_currency: dict = {}
     for s in sales:
         cur = s.get('currency') or 'USD'
         revenue_by_currency[cur] = round(revenue_by_currency.get(cur, 0) + s.get('total', 0), 2)
 
+    # Low stock alerts
+    low_stock = [
+        {
+            "produce_id": p.get('produce_id'),
+            "name": p.get('name'),
+            "quantity": p.get('quantity'),
+            "unit": p.get('unit'),
+            "threshold": p.get('low_stock_threshold', 0),
+            "farm_id": p.get('farm_id'),
+        }
+        for p in produce
+        if float(p.get('low_stock_threshold') or 0) > 0
+        and float(p.get('quantity') or 0) <= float(p.get('low_stock_threshold') or 0)
+    ]
+
     return {
         "period": period,
+        "primary_currency": target,
+        "primary_symbol": CURRENCY_SYMBOLS.get(target, '$'),
         "total_revenue": round(total_revenue, 2),
         "total_investment": round(total_investment, 2),
         "profit": profit,
@@ -583,6 +704,7 @@ async def dashboard(period: Literal['daily', 'weekly', 'monthly'] = 'monthly',
         "sales_by_category": by_category,
         "investment_by_category": invest_by_cat,
         "revenue_by_currency": revenue_by_currency,
+        "low_stock_alerts": low_stock,
         "sales_count": len(sales),
         "produce_count": len(produce),
     }

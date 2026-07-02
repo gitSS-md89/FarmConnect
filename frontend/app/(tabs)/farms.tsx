@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { api } from '@/src/lib/api';
+import { detectCurrency, detectUnit, POPULAR_CURRENCIES, UNITS, CURRENCY_SYMBOLS } from '@/src/lib/currency';
 import { ScreenHeader, Card, PrimaryButton } from '@/src/ui/components';
 
 export default function Farms() {
@@ -15,8 +16,15 @@ export default function Farms() {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [size, setSize] = useState('');
+  const [currency, setCurrency] = useState<string | null>(null);
+  const [unit, setUnit] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const detectedCurrency = useMemo(() => detectCurrency(location) || 'USD', [location]);
+  const detectedUnit = useMemo(() => detectUnit(location, detectedCurrency), [location, detectedCurrency]);
+  const effectiveCurrency = currency || detectedCurrency;
+  const effectiveUnit = unit || detectedUnit;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -25,6 +33,11 @@ export default function Farms() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const openAdd = () => {
+    setName(''); setLocation(''); setSize(''); setCurrency(null); setUnit(null); setErr(null);
+    setShowAdd(true);
+  };
 
   const submit = async () => {
     setErr(null);
@@ -37,9 +50,11 @@ export default function Farms() {
           name: name.trim(),
           location: location.trim() || null,
           size_acres: size ? parseFloat(size) : null,
+          currency: effectiveCurrency,
+          default_unit: effectiveUnit,
         }),
       });
-      setShowAdd(false); setName(''); setLocation(''); setSize('');
+      setShowAdd(false);
       await load();
     } catch (e: any) { setErr(e.message); }
     finally { setBusy(false); }
@@ -52,7 +67,7 @@ export default function Farms() {
         title="Farms"
         subtitle={`${farms.length} farm${farms.length === 1 ? '' : 's'}`}
         right={
-          <Pressable testID="add-farm-btn" onPress={() => setShowAdd(true)} style={[styles.iconBtn, { backgroundColor: colors.brandPrimary }]}>
+          <Pressable testID="add-farm-btn" onPress={openAdd} style={[styles.iconBtn, { backgroundColor: colors.brandPrimary }]}>
             <Ionicons name="add" size={22} color={colors.onBrandPrimary} />
           </Pressable>
         }
@@ -88,6 +103,18 @@ export default function Farms() {
                 <Text style={{ color: colors.muted, marginTop: 2 }}>
                   {f.location || 'No location'}{f.size_acres ? ` • ${f.size_acres} acres` : ''}
                 </Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                  {f.currency && (
+                    <View testID={`farm-badge-currency-${f.farm_id}`} style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: colors.brandTertiary }}>
+                      <Text style={{ color: colors.onBrandTertiary, fontSize: 11, fontWeight: '700' }}>{f.currency}</Text>
+                    </View>
+                  )}
+                  {f.default_unit && (
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: colors.surfaceTertiary }}>
+                      <Text style={{ color: colors.onSurface, fontSize: 11, fontWeight: '600' }}>{f.default_unit}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.muted} />
             </Pressable>
@@ -97,16 +124,69 @@ export default function Farms() {
 
       <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
-          <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+          <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' }}>
             <View style={{ alignItems: 'center', marginBottom: 12 }}>
               <View style={{ width: 40, height: 4, backgroundColor: colors.border, borderRadius: 2 }} />
             </View>
             <Text style={{ color: colors.onSurface, fontSize: 22, fontWeight: '800' }}>New Farm</Text>
             <Text style={{ color: colors.muted, marginTop: 4 }}>Register a farm you own or manage</Text>
-            <Input label="Name" value={name} onChangeText={setName} testID="farm-input-name" colors={colors} placeholder="Green Valley" />
-            <Input label="Location" value={location} onChangeText={setLocation} testID="farm-input-location" colors={colors} placeholder="Punjab, IN" />
-            <Input label="Size (acres)" value={size} onChangeText={setSize} testID="farm-input-size" keyboardType="decimal-pad" colors={colors} placeholder="12" />
-            {err && <Text style={{ color: colors.error, marginTop: 8 }}>{err}</Text>}
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ marginTop: 4 }}>
+              <Input label="Name*" value={name} onChangeText={setName} testID="farm-input-name" colors={colors} placeholder="Green Valley" />
+              <Input label="Location" value={location} onChangeText={(t: string) => { setLocation(t); setCurrency(null); setUnit(null); }} testID="farm-input-location" colors={colors} placeholder="Punjab, India" />
+              <Input label="Size (acres)" value={size} onChangeText={setSize} testID="farm-input-size" keyboardType="decimal-pad" colors={colors} placeholder="12" />
+
+              <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 6 }}>
+                Currency {location ? `(auto: ${detectedCurrency})` : ''}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+                {POPULAR_CURRENCIES.map(c => {
+                  const selected = effectiveCurrency === c;
+                  return (
+                    <Pressable
+                      key={c}
+                      testID={`farm-currency-${c}`}
+                      onPress={() => setCurrency(c)}
+                      style={{
+                        paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                        alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                        borderColor: selected ? colors.brandPrimary : colors.border,
+                      }}
+                    >
+                      <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>
+                        {CURRENCY_SYMBOLS[c]} {c}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 6 }}>
+                Default Unit {location ? `(auto: ${detectedUnit})` : ''}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+                {UNITS.map(u => {
+                  const selected = effectiveUnit === u;
+                  return (
+                    <Pressable
+                      key={u}
+                      testID={`farm-unit-${u}`}
+                      onPress={() => setUnit(u)}
+                      style={{
+                        paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                        alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                        borderColor: selected ? colors.brandPrimary : colors.border,
+                      }}
+                    >
+                      <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>{u}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              {err && <Text style={{ color: colors.error, marginTop: 8 }}>{err}</Text>}
+            </ScrollView>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
               <Pressable testID="farm-cancel" onPress={() => setShowAdd(false)} style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
                 <Text style={{ color: colors.onSurface, fontWeight: '600' }}>Cancel</Text>
