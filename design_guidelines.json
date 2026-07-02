@@ -1,0 +1,189 @@
+{
+  "app_name": "FarmConnect",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "Modern minimal agriculture with a fresh agri-green palette, focusing on pristine data immersion and operational clarity.",
+  "color": {
+    "surface": "#F9FAF8",
+    "onSurface": "#1B231E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1B231E",
+    "surfaceTertiary": "#F0F4EF",
+    "onSurfaceTertiary": "#2D6A4F",
+    "surfaceInverse": "#1B231E",
+    "onSurfaceInverse": "#F9FAF8",
+    "brand": "#2D6A4F",
+    "brandPrimary": "#2D6A4F",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#40916C",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#D8E2DC",
+    "onBrandTertiary": "#1B4332",
+    "success": "#2D6A4F",
+    "onSuccess": "#FFFFFF",
+    "warning": "#E07A5F",
+    "onWarning": "#FFFFFF",
+    "error": "#D90429",
+    "onError": "#FFFFFF",
+    "info": "#40916C",
+    "onInfo": "#FFFFFF",
+    "border": "#E5EBE7",
+    "borderStrong": "#A3BCA9",
+    "divider": "#E5EBE7",
+    "dark_mode_colors": {
+      "surface": "#121614",
+      "onSurface": "#E8ECE9",
+      "surfaceSecondary": "#1A201C",
+      "onSurfaceSecondary": "#E8ECE9",
+      "surfaceTertiary": "#232B26",
+      "onSurfaceTertiary": "#74C69D",
+      "surfaceInverse": "#F9FAF8",
+      "onSurfaceInverse": "#1B231E",
+      "brand": "#52B788",
+      "brandPrimary": "#52B788",
+      "onBrandPrimary": "#081C15",
+      "brandSecondary": "#74C69D",
+      "onBrandSecondary": "#081C15",
+      "brandTertiary": "#1B4332",
+      "onBrandTertiary": "#D8E2DC",
+      "border": "#2C3630",
+      "borderStrong": "#4A5D53",
+      "divider": "#2C3630"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical breathing room. Cards never flush to screen edges; always keep md to lg padding. Use intentional whitespace to separate data rather than heavy borders or dividers.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Apply to bottom tab bar and sticky headers over scrolling lists.",
+      "Use on floating action buttons (FABs) when layered over content.",
+      "Use as overlay on hero cards with photo backgrounds."
+    ],
+    "dont's": [
+      "Do not apply glass to data cards, form inputs, or regular list items.",
+      "Never stack multiple glass layers inside each other."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Auth",
+      "purpose": "Secure entry via Email or Google.",
+      "states": {
+        "loading": "Spinner centered on screen with 'Authenticating...'",
+        "empty": "N/A",
+        "error": "Toast or inline message with retry button"
+      },
+      "layout": "Clean hero image at the top with a gradient scrim fading to surface. Form inputs in a single column with labels above. Sticky primary CTA at the bottom."
+    },
+    {
+      "name": "Dashboard",
+      "purpose": "Provide aggregate stats for produce, sales, and investments daily/weekly/monthly.",
+      "states": {
+        "loading": "Skeleton loaders for stat cards.",
+        "empty": "Illustration of an empty field with prompt 'Add your first farm to view analytics'.",
+        "error": "Retry connection prompt covering full screen."
+      },
+      "layout": "Minimalist card-based layout. Shadowless cards with 1px border. Large typography for percentages (e.g., 92% Health). Use linear progress bars instead of complex charts. Horizontal scroll for quick metric categories."
+    },
+    {
+      "name": "Farms & Produce",
+      "purpose": "List farms and manage their respective produce, sellers, and investments.",
+      "states": {
+        "loading": "Skeleton list items.",
+        "empty": "Basket illustration with 'No produce added yet. Tap + to start'.",
+        "error": "Unable to load farms error with Retry."
+      },
+      "layout": "List items with 56pt tappable height. Leading visual (photo or tinted initial), bold title, and chevron. FAB (glass) at bottom right to add new Farm/Produce."
+    },
+    {
+      "name": "AI Assistant",
+      "purpose": "Chat interface for analytics, suggestions, and photo-based disease detection.",
+      "states": {
+        "loading": "Typing indicator bubbles.",
+        "empty": "Greeting from AI with suggested prompt chips (e.g., 'Analyze Profit', 'Detect Disease').",
+        "error": "Failed to send message icon."
+      },
+      "layout": "Standard chat feed layout. A sticky prominent action bar for 'Upload Photo'. When a photo is uploaded, show it in a rounded container with a glass overlay analysis card."
+    },
+    {
+      "name": "Market & Community",
+      "purpose": "Subscription-gated marketplace to sell produce and connect with Farm Friends.",
+      "states": {
+        "loading": "Spinner or skeleton grid.",
+        "empty": "Unlock Marketplace empty state with padlock icon and subscription CTA.",
+        "error": "Failed to load market."
+      },
+      "layout": "2-column grid layout for market products. For community, vertical feed of posts. Subscription gate must use a premium glass-morphic hero card to prompt upgrade."
+    }
+  ],
+  "images": {
+    "hero_landscape": {
+      "url": "https://images.unsplash.com/photo-1494187570835-b188e7f0f26e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZ3JlZW4lMjBmYXJtJTIwbGFuZHNjYXBlfGVufDB8fHx8MTc4MzAwMTEyMHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Minimalist green farm landscape"
+    },
+    "produce_market": {
+      "url": "https://images.pexels.com/photos/5425794/pexels-photo-5425794.jpeg",
+      "alt": "Basket filled with fresh harvested vegetables"
+    },
+    "disease_detection": {
+      "url": "https://images.pexels.com/photos/28166522/pexels-photo-28166522.jpeg",
+      "alt": "Close up of plant leaf disease"
+    }
+  },
+  "haptics": {
+    "button_press": "light",
+    "tab_switch": "light",
+    "success_action": "success",
+    "error_action": "error",
+    "bottom_sheet_open": "medium"
+  },
+  "instructions_to_main_agent": [
+    "IMPLEMENT THE DARK MODE: I've provided 'dark_mode_colors' inside the 'color' object. Set up the theme provider to switch between light and dark modes explicitly as requested by the user.",
+    "NO BLUES OR PURPLES: Strict adherence to the fresh agri-green palette. Do not default to generic blue colors for primary buttons, links, or system icons.",
+    "HERO SCRIMS: Ensure that anytime text sits on top of the hero_landscape or produce_market images, a top-to-bottom linear gradient scrim (transparent to at least 70% surfaceInverse) is applied behind the text.",
+    "DASHBOARD LAYOUT: Use 'Minimal Data Immersion' principles based on web research. Strip away heavy borders; use 1px subtle borders (color: border) with shadow_tier 1. Prefer large clean numbers and progress bars over complex pie charts.",
+    "STICKY CTAS: For the 'Add Farm/Produce' forms, the primary Submit button must be sticky at the bottom inside a KeyboardAvoidingView.",
+    "AI CHAT & PHOTO: The AI Assistant needs a prominent affordance to upload a photo for disease detection. This is a core feature; make the 'Camera/Upload' button easily accessible next to the chat input.",
+    "GLASSMORPHISM: Apply glass effects (expo-glass-effect / expo-blur) to the bottom tab bar and header over scrollable content. Ensure foreground readability."
+  ]
+}
