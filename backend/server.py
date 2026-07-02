@@ -118,9 +118,12 @@ class FarmUpdateIn(BaseModel):
     description: Optional[str] = None
     currency: Optional[str] = None
     default_unit: Optional[str] = None
+    logo: Optional[str] = None  # base64 image
 
 class UserSettingsIn(BaseModel):
     primary_currency: Optional[str] = None
+    picture: Optional[str] = None          # base64 image (with or without data URL prefix)
+    background_image: Optional[str] = None # base64 image; empty string clears back to default
 
 class ProduceIn(BaseModel):
     farm_id: str
@@ -381,6 +384,11 @@ async def update_user_settings(body: UserSettingsIn, authorization: Optional[str
         if body.primary_currency not in CURRENCY_SYMBOLS:
             raise HTTPException(400, 'Unsupported currency')
         updates['primary_currency'] = body.primary_currency
+    if body.picture is not None:
+        # Empty string clears the avatar
+        updates['picture'] = body.picture if body.picture else None
+    if body.background_image is not None:
+        updates['background_image'] = body.background_image if body.background_image else None
     if not updates:
         raise HTTPException(400, 'No changes provided')
     await db.users.update_one({"user_id": user['user_id']}, {"$set": updates})

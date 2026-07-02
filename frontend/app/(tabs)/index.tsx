@@ -1,19 +1,24 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl, ActivityIndicator, ImageBackground, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { api } from '@/src/lib/api';
 import { symbol } from '@/src/lib/currency';
-import { ScreenHeader, Card } from '@/src/ui/components';
+import { Card } from '@/src/ui/components';
 
 type Period = 'daily' | 'weekly' | 'monthly';
+
+const DEFAULT_BG = 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=1200';
 
 export default function Dashboard() {
   const { colors, mode, toggle } = useTheme();
   const { user, logout } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [period, setPeriod] = useState<Period>('monthly');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -31,27 +36,47 @@ export default function Dashboard() {
 
   const doLogout = async () => { await logout(); router.replace('/auth'); };
   const sym = data?.primary_symbol || '$';
+  const initial = (user?.name || 'F')[0].toUpperCase();
+  const bgUri = user?.background_image || DEFAULT_BG;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <ScreenHeader
-        testID="dashboard-header"
-        title={`Hi, ${user?.name?.split(' ')[0] || 'Farmer'} 👋`}
-        subtitle="Your farm at a glance"
-        right={
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable testID="settings-btn" onPress={() => router.push('/settings')} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
-              <Ionicons name="settings-outline" size={18} color={colors.onSurface} />
+      <ImageBackground
+        testID="dashboard-hero"
+        source={{ uri: bgUri }}
+        style={{ paddingTop: insets.top + 12, paddingBottom: 22, paddingHorizontal: 20 }}
+      >
+        <LinearGradient
+          colors={['rgba(0,0,0,0.15)', mode === 'dark' ? 'rgba(18,22,20,0.7)' : 'rgba(0,0,0,0.35)']}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable testID="dashboard-avatar" onPress={() => router.push('/settings')} style={{ width: 44, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center' }}>
+            {user?.picture ? (
+              <Image source={{ uri: user.picture }} style={{ width: 44, height: 44 }} />
+            ) : (
+              <Text style={{ color: colors.onBrandTertiary, fontSize: 18, fontWeight: '800' }}>{initial}</Text>
+            )}
+          </Pressable>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800', textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 6 }}>
+              Hi, {user?.name?.split(' ')[0] || 'Farmer'}
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', marginTop: 2, fontSize: 12 }}>Your farm at a glance</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <Pressable testID="settings-btn" onPress={() => router.push('/settings')} style={[styles.iconBtnHero]}>
+              <Ionicons name="settings-outline" size={16} color="#fff" />
             </Pressable>
-            <Pressable testID="theme-toggle" onPress={toggle} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
-              <Ionicons name={mode === 'dark' ? 'sunny' : 'moon'} size={18} color={colors.onSurface} />
+            <Pressable testID="theme-toggle" onPress={toggle} style={[styles.iconBtnHero]}>
+              <Ionicons name={mode === 'dark' ? 'sunny' : 'moon'} size={16} color="#fff" />
             </Pressable>
-            <Pressable testID="logout-btn" onPress={doLogout} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
-              <Ionicons name="log-out-outline" size={18} color={colors.onSurface} />
+            <Pressable testID="logout-btn" onPress={doLogout} style={[styles.iconBtnHero]}>
+              <Ionicons name="log-out-outline" size={16} color="#fff" />
             </Pressable>
           </View>
-        }
-      />
+        </View>
+      </ImageBackground>
 
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
@@ -177,4 +202,5 @@ function Row({ label, value, colors, last }: any) {
 
 const styles = StyleSheet.create({
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  iconBtnHero: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.2)' },
 });

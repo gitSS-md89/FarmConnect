@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
@@ -94,9 +94,14 @@ export default function Farms() {
             >
               <View style={{
                 width: 48, height: 48, borderRadius: 12,
-                backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center', marginRight: 14,
+                backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center',
+                overflow: 'hidden', marginRight: 14,
               }}>
-                <Ionicons name="leaf" size={22} color={colors.onBrandTertiary} />
+                {f.logo ? (
+                  <Image testID={`farm-logo-${f.farm_id}`} source={{ uri: f.logo }} style={{ width: 48, height: 48 }} />
+                ) : (
+                  <Ionicons name="leaf" size={22} color={colors.onBrandTertiary} />
+                )}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.onSurface, fontWeight: '700', fontSize: 16 }}>{f.name}</Text>

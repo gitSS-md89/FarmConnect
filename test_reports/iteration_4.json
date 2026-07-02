@@ -1,0 +1,35 @@
+{
+  "summary": "Iter-4 backend + UI testing complete. 10/10 new pytests in test_iter4_profile_media.py PASS + 77 regression tests still green (87/87, only assistant LLM deselected as usual). Verified: (a) BUG FIX — Farm Detail MiniStats display in farm.currency. Steps executed exactly as requested: created Delhi India farm (auto currency INR), 100kg Wheat produce, Mumbai India seller (auto INR), sold 10kg @ ₹100 (total ₹1000), added ₹500 INR investment. On farm/[id] page: mini-revenue='REVENUE (INR) ₹1,000', mini-invested='INVESTED (INR) ₹500', mini-profit='PROFIT (INR) ₹500'. All three testIDs render with the ₹ symbol and (INR) label. Confirmed via live mobile UI + inner_text assertions. (b) Multi-currency regression: adding a USD investment on the same INR farm keeps both currencies stored natively; frontend convert() folds them all to farm.currency for the MiniStat sums. (c) PATCH /api/users/me/settings 'picture' accepts base64/data-URL string, returns updated user with picture set; empty string clears to null; same for background_image; GET /api/me reflects updates; unauth → 401. (d) PATCH /api/farms/{id} 'logo' works owner-only: 401 unauth, 404 on bad id, list farms reflects logo. (e) Dashboard hero (testID dashboard-hero) + dashboard-avatar render; tapping avatar navigates to /settings; settings-btn/theme-toggle/logout-btn all present. Hero re-renders after background_image PATCH (uses user.background_image). (f) Settings screen: pick-avatar (tap target for OS picker), background-card, pick-background all present. After setting picture+bg via PATCH, clear-avatar and clear-background appear (conditional render). (g) Farm Settings modal (opened via farm-settings-btn): fs-pick-logo + (after logo PATCH) fs-logo-preview render at top; farm list card shows farm-logo-{farm_id} thumbnail. All acceptance criteria met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "React Native web warnings", "issue": "Console warnings 'props.pointerEvents is deprecated. Use style.pointerEvents' and '\"textShadow*\" style props are deprecated. Use \"textShadow\"' surface repeatedly on web. Non-blocking but should be migrated. Likely originating from a third-party component (Ionicons/react-native-web) — inspect ScreenHeader/ImageBackground/PrimaryButton for inline pointerEvents and textShadowColor/-Offset/-Radius usage."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter4_profile_media.py",
+    "/app/test_reports/pytest/pytest_iter4.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: migrate deprecated pointerEvents (prop→style) and split textShadowColor/Offset/Radius into single textShadow shorthand to silence RN 0.7x web warnings."
+  ],
+  "critical_code_review_comments": [
+    "farm/[id].tsx L52-53 correctly uses convert() with `farm.currency` as target and `x.currency || displayCurrency` fallback for investments/sales — the exact fix for the reported bug.",
+    "server.py PATCH /users/me/settings accepts optional picture/background_image; empty string → null (clears); 400 when no updates. Whitelists currency against CURRENCY_SYMBOLS. Good.",
+    "server.py PATCH /farms/{id} FarmUpdateIn now includes logo:Optional[str]; matched_count==0 → 404 (correct owner-scoped 404 for both non-owner and non-existent).",
+    "Frontend settings.tsx exposes pick-avatar / clear-avatar / background-card / pick-background / clear-background testIDs; clear-* render conditionally (only when value set) — verified.",
+    "farm/[id].tsx FarmSettingsModal exposes fs-pick-logo + fs-logo-preview and PATCHes /farms/{id} with logo — verified persisted after reopen."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter4_profile_media.py (created — 10 tests)"
+  ],
+  "success_rate": {"backend": "100% (87/87 non-assistant: 10 iter-4 + 77 regression)", "frontend": "100% on iter-4 UI: dashboard hero+avatar, avatar→/settings nav, settings pick/background cards, farm-logo on farm list, MiniStats show ₹500 INR (bug fixed), Farm Settings fs-pick-logo + fs-logo-preview"},
+  "seed_data_creation": "iter-4 pytest creates fresh TEST_ farms/produce/sellers/sales/investments via public URL and deletes them (cascade cleans produce/sales/investments). UI test also creates a TEST_UI_INR farm + reproduction data and deletes it; user primary_currency reset to USD, picture/background_image cleared as final cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && python -m pytest backend/tests/ -v -k 'not assistant' (expect 87/87). Iter-4 tests live in test_iter4_profile_media.py. Key iter-4 testIDs verified: dashboard-hero, dashboard-avatar, settings-btn, theme-toggle, logout-btn, pick-avatar, clear-avatar (conditional), background-card, pick-background, clear-background (conditional), farm-logo-{farm_id}, fs-pick-logo, fs-logo-preview, mini-revenue, mini-invested, mini-profit (all show `LABEL (CUR)` + fmt symbol). Auth token localStorage key: 'fc_auth_token'. Reset test user's primary_currency to USD + clear picture/background_image before starting UI runs to keep state predictable.",
+  "rca_of_issue": "Bug 'Investment showing in USD in Top Bar even when added in INR' — RCA: prior farm/[id].tsx summed sale.total and investment.amount directly without converting to farm.currency, so mixed/no conversion led to symbol-currency mismatch. FIX (already in place at farm/[id].tsx L52-53): totalRevenue = Σ convert(s.total, s.currency||'USD', farm.currency); totalInvest = Σ convert(x.amount, x.currency||farm.currency, farm.currency). MiniStat label now `\"Revenue (${displayCurrency})\"` and value `fmt(v, displayCurrency)`. Verified live: ₹500 INR investment renders as 'INVESTED (INR) ₹500' — NOT $500."
+}

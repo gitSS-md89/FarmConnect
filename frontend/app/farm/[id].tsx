@@ -1,13 +1,14 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet, TextInput, Modal, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Alert,
+  ActivityIndicator, Alert, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { api } from '@/src/lib/api';
-import { fmt, symbol, detectCurrency, POPULAR_CURRENCIES, CURRENCY_SYMBOLS, UNITS } from '@/src/lib/currency';
+import { fmt, symbol, detectCurrency, POPULAR_CURRENCIES, CURRENCY_SYMBOLS, UNITS, convert } from '@/src/lib/currency';
 import { ScreenHeader, Card, PrimaryButton } from '@/src/ui/components';
 
 type Tab = 'produce' | 'sales' | 'invest' | 'sellers';
@@ -46,16 +47,18 @@ export default function FarmDetail() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Group sales revenue by currency
+  // Convert everything to farm's currency for the top mini-stats
+  const displayCurrency = farm?.currency || 'USD';
+  const totalRevenue = sales.reduce((a, s) => a + convert(s.total || 0, s.currency || 'USD', displayCurrency), 0);
+  const totalInvest = invests.reduce((a, x) => a + convert(x.amount || 0, x.currency || displayCurrency, displayCurrency), 0);
+
+  // Native breakdown for the extra chip row when mixed currencies exist
   const revenueByCurrency: Record<string, number> = sales.reduce((acc: any, s: any) => {
     const c = s.currency || 'USD';
     acc[c] = (acc[c] || 0) + (s.total || 0);
     return acc;
   }, {});
   const currencyKeys = Object.keys(revenueByCurrency);
-  const primaryCurrency = currencyKeys.length === 1 ? currencyKeys[0] : (currencyKeys[0] || 'USD');
-  const totalRevenuePrimary = revenueByCurrency[primaryCurrency] || 0;
-  const totalInvest = invests.reduce((a, x) => a + (x.amount || 0), 0);
 
   const deleteFarm = async () => {
     Alert.alert('Delete Farm?', 'This will remove all data for this farm.', [
@@ -90,15 +93,22 @@ export default function FarmDetail() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <MiniStat
-            label={`Revenue${currencyKeys.length > 1 ? ' (' + primaryCurrency + ')' : ''}`}
-            value={fmt(totalRevenuePrimary, primaryCurrency)}
+            testID="mini-revenue"
+            label={`Revenue (${displayCurrency})`}
+            value={fmt(totalRevenue, displayCurrency)}
             color={colors.brand}
           />
-          <MiniStat label="Invested" value={fmt(totalInvest, 'USD')} color={colors.warning} />
           <MiniStat
-            label="Profit"
-            value={currencyKeys.length > 1 ? 'Multi' : fmt(totalRevenuePrimary - totalInvest, primaryCurrency)}
-            color={(totalRevenuePrimary - totalInvest) >= 0 ? colors.success : colors.error}
+            testID="mini-invested"
+            label={`Invested (${displayCurrency})`}
+            value={fmt(totalInvest, displayCurrency)}
+            color={colors.warning}
+          />
+          <MiniStat
+            testID="mini-profit"
+            label={`Profit (${displayCurrency})`}
+            value={fmt(totalRevenue - totalInvest, displayCurrency)}
+            color={(totalRevenue - totalInvest) >= 0 ? colors.success : colors.error}
           />
         </View>
         {currencyKeys.length > 1 && (
@@ -249,10 +259,10 @@ function Empty({ text }: { text: string }) {
   );
 }
 
-function MiniStat({ label, value, color }: any) {
+function MiniStat({ label, value, color, testID }: any) {
   const { colors } = useTheme();
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12 }}>
+    <View testID={testID} style={{ flex: 1, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12 }}>
       <Text style={{ color: colors.muted, fontSize: 11, fontWeight: '600' }}>{label.toUpperCase()}</Text>
       <Text style={{ color, fontSize: 16, fontWeight: '800', marginTop: 4 }}>{value}</Text>
     </View>
@@ -655,7 +665,9 @@ function FarmSettingsModal({ visible, farm, onClose, onSaved }: any) {
   const [size, setSize] = useState('');
   const [currency, setCurrency] = useState<string | null>(null);
   const [unit, setUnit] = useState<string | null>(null);
+  const [logo, setLogo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -665,9 +677,25 @@ function FarmSettingsModal({ visible, farm, onClose, onSaved }: any) {
       setSize(farm.size_acres ? String(farm.size_acres) : '');
       setCurrency(farm.currency || null);
       setUnit(farm.default_unit || null);
+      setLogo(farm.logo || null);
       setErr(null);
     }
   }, [visible, farm]);
+
+  const pickLogo = async () => {
+    setErr(null);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { setErr('Photo library permission needed'); return; }
+    setUploadingLogo(true);
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.5, allowsEditing: true, aspect: [1, 1], base64: true,
+      });
+      if (!r.canceled && r.assets?.[0]?.base64) {
+        setLogo(`data:image/jpeg;base64,${r.assets[0].base64}`);
+      }
+    } finally { setUploadingLogo(false); }
+  };
 
   const save = async () => {
     setErr(null); setBusy(true);
@@ -678,6 +706,7 @@ function FarmSettingsModal({ visible, farm, onClose, onSaved }: any) {
       if (size !== (farm.size_acres ? String(farm.size_acres) : '')) payload.size_acres = size ? parseFloat(size) : null;
       if (currency && currency !== farm.currency) payload.currency = currency;
       if (unit && unit !== farm.default_unit) payload.default_unit = unit;
+      if (logo !== (farm.logo || null) && logo) payload.logo = logo;
       if (Object.keys(payload).length === 0) { onClose(); return; }
       await api(`/farms/${farm.farm_id}`, { method: 'PATCH', body: JSON.stringify(payload) });
       await onSaved();
@@ -696,8 +725,31 @@ function FarmSettingsModal({ visible, farm, onClose, onSaved }: any) {
             <View style={{ width: 40, height: 4, backgroundColor: colors.border, borderRadius: 2 }} />
           </View>
           <Text style={{ color: colors.onSurface, fontSize: 22, fontWeight: '800' }}>Farm Settings</Text>
-          <Text style={{ color: colors.muted, marginTop: 4 }}>Currency, units and profile for this farm</Text>
+          <Text style={{ color: colors.muted, marginTop: 4 }}>Currency, units, logo and profile for this farm</Text>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ marginTop: 8 }}>
+            {/* Farm logo */}
+            <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 8, marginBottom: 8 }}>Farm Logo</Text>
+            <Pressable
+              testID="fs-pick-logo"
+              onPress={pickLogo}
+              style={{
+                width: 96, height: 96, borderRadius: 16, alignSelf: 'flex-start', overflow: 'hidden',
+                backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center',
+                borderWidth: 1, borderColor: colors.border,
+              }}
+            >
+              {logo ? (
+                <Image testID="fs-logo-preview" source={{ uri: logo }} style={{ width: 96, height: 96 }} />
+              ) : (
+                <Ionicons name="camera" size={28} color={colors.onBrandTertiary} />
+              )}
+              {uploadingLogo && (
+                <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' }}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              )}
+            </Pressable>
+
             <SettingsField label="Name*" testID="fs-name" value={name} onChangeText={setName} />
             <SettingsField label="Location" testID="fs-location" value={location} onChangeText={setLocation} placeholder="e.g. Punjab, India" />
             <SettingsField label="Size (acres)" testID="fs-size" value={size} onChangeText={setSize} keyboardType="decimal-pad" />
