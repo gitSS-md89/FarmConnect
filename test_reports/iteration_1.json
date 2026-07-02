@@ -1,0 +1,50 @@
+{
+  "summary": "FarmConnect first-iteration testing (both backend + frontend). Backend: 28/28 pytest assertions passing on the public URL — auth (register/login/me + wrong password + duplicate + invalid/no token), farms CRUD, produce (with owner-scoped farm validation), sellers, sales (total = qty*rate verified), investments, dashboard for daily/weekly/monthly (revenue/investment/profit/avg_rate/sales_by_category/investment_by_category all correct), community posts create/list/like, market listings and subscribe/unsubscribe toggling user.subscription.active, AI assistant text chat and image (base64 JPEG w/ real content) chat via Gemini 3.1-pro-preview through emergentintegrations. Frontend (mobile viewport 390x844): signup navigates to dashboard, all four tabs render, farm-create modal works, farm detail shows correct MiniStats, add produce (Grain chip), add seller, record sale (50 × $20 = $1000 total displayed), add investment (Seeds $300), and dashboard correctly reflects Revenue $1000 / Investment $300 / Profit $700 / Avg Rate $20 / Sales by Category Grain $1000 / Investments by Category Seeds $300. Market screen shows Unlock Marketplace card + 4 listings + Community subtab. AI screen renders suggestion chips + camera + input. No React Native red screens or fatal errors. One intermittent LLM ‘budget exceeded’ blip on Emergent key was observed then self-recovered on retry — flagged for main agent.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/assistant/chat", "issue": "Intermittent 500 with body 'litellm.BadRequestError: OpenAIException - Budget has been exceeded! Current cost: 0.0, Max budget: 0.0'. Reproduced once, passed on immediate retry. Likely transient issue upstream on Emergent LLM key. Recommend adding a single retry (or surfacing a friendlier client-side error) inside /api/assistant/chat."},
+      {"endpoint": "GET /api/auth/me", "issue": "Duplicate/dead route handler defined at line 235-238 (`me` with `user=None` and no logic — returns None). It's shadowed by the real /api/me at line 240-243 and is unreachable via clients (path is /auth/me, not called by frontend), but it's dead code that should be removed."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AddModal (farm/[id].tsx)", "issue": "Console error: 'A component is changing an uncontrolled input to be controlled...' — the state `f` starts as `{}` so `f.name`/`f.quantity` etc. are undefined on first render, then become defined. Initialize `f` with all keys as '' (empty string) to eliminate warning.", "testID": "in-name", "priority": "LOW"},
+      {"component": "add-fab (farm/[id].tsx)", "issue": "Console warning: 'shadow* style props are deprecated. Use boxShadow' — the FAB uses shadowColor/shadowOpacity/shadowRadius/shadowOffset on React Native Web. Consider platform-conditional style or migrate to boxShadow for web.", "testID": "add-fab", "priority": "LOW"},
+      {"component": "AI chat send", "issue": "Send arrow button on assistant screen has no testID. Adding testID='chat-send' would make it testable. (Enter key does not appear to submit on web — text stayed in input.) Please verify onPress wiring on the send button and add testID.", "testID": "missing", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Farm Detail", "issues": ["Section tab pills scroll horizontally; the first tab can appear clipped on the left (see /tmp/07_after_sale.png showing '1)'). Consider paddingLeft on the ScrollView contentContainerStyle or wrap tabs with initial offset 0."]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Deprecated on RN Web. Reference: /app/frontend/app/farm/[id].tsx:154 (add-fab styles). Migrate to boxShadow (web) or leave native-only."},
+      {"component": "props.pointerEvents", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' warning surfaced — likely from a third-party component (LinearGradient / Modal). If any own code passes pointerEvents as a prop, move it into style."}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_farmconnect.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(Optional) Add a single-retry wrapper around chat.send_message inside /api/assistant/chat to smooth out intermittent Emergent LLM ‘budget exceeded’ hiccups; ensure the surfaced error is a friendly 'AI temporarily unavailable' if it still fails.",
+    "Remove dead /api/auth/me route stub in backend/server.py:235-238.",
+    "Initialize the AddModal form state `f` with default '' values for each field (name, quantity, rate, amount, description, etc.) to silence controlled/uncontrolled input warning in farm/[id].tsx.",
+    "Add testID='chat-send' to the send arrow button on the AI assistant screen and verify the button’s onPress actually calls send. During UI test, typing then pressing Enter did not submit — please confirm keyboard submit behavior or add explicit send-button click flow.",
+    "Migrate shadow* props on the add-fab (farm/[id].tsx:154) to boxShadow for web, or use Platform.select to keep shadow* on native only.",
+    "Slight horizontal padding on the Section tabs ScrollView in farm/[id].tsx so the first pill isn’t visually clipped."
+  ],
+  "critical_code_review_comments": [
+    "Backend server.py is single-file and ~660 lines — still under the 700-line guideline, but if more features land it should be split into routers (auth.py, farms.py, market.py, assistant.py).",
+    "All MongoDB reads correctly exclude _id via projection {'_id': 0}. Passwords excluded via password_hash exclusion. Good.",
+    "get_current_user cleanly supports both JWT and Emergent session_token via user_sessions collection.",
+    "Sale total is computed server-side (quantity*rate) — trust boundary correct.",
+    "EmergentIntegrations chat uses model 'gemini-3.1-pro-preview' as instructed (Gemini 3 Pro).",
+    "Frontend uses process.env.EXPO_PUBLIC_BACKEND_URL — good; token stored in SecureStore on native and localStorage on web.",
+    "All interactive elements have testID (tab-*, farm-input-*, farm-submit, section-tab-*, add-fab, cat-*, sale-produce-*, etc.) — very testable. Only the AI chat send button is missing a testID."
+  ],
+  "updated_files": ["/app/backend/tests/test_farmconnect.py (created)"],
+  "success_rate": {"backend": "100% (28/28 with 1 flake retried)", "frontend": "~95% (all critical flows work; minor console warnings and one missing testID)"},
+  "seed_data_creation": "Fresh ephemeral user (TEST_<uuid>@farm.com) created via /api/auth/register during pytest and a separate UI signup user via web. The pytest suite deletes its farm at teardown, cascading produce/sales/investments. User docs remain and are prefixed TEST_ for cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend base URL: https://agri-operations-1.preview.emergentagent.com. Seeded email/pw: test@farm.com / secret123 (if missing the pytest re-creates it). Backend pytest file: /app/backend/tests/test_farmconnect.py — run `cd /app && python -m pytest backend/tests/test_farmconnect.py -v`. AI chat tests need a real base64 JPEG (helper _small_jpeg_b64 generates one via Pillow). Intermittent LLM ‘budget exceeded’ error observed on /api/assistant/chat — retry once before flagging as a real failure.",
+  "rca_of_issue": "N/A — no user-reported bug. Only observations: (a) console warnings due to legacy shadow* and uncontrolled inputs (cosmetic); (b) transient Emergent LLM 500 that self-recovered."
+}
