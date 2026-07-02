@@ -133,7 +133,13 @@ export default function FarmDetail() {
                   <Row title={i.category} subtitle={i.description || ''} right={`$${i.amount}`} colors={colors} />
                 </Card>
               )))}
-            {tab === 'sellers' && (sellers.length === 0 ? <Empty text="No sellers yet" /> :
+            {tab === 'sellers' && (sellers.length === 0 ? (
+              <Card testID="empty-sellers">
+                <Ionicons name="people-outline" size={36} color={colors.brand} style={{ alignSelf: 'center', marginBottom: 10 }} />
+                <Text style={{ color: colors.onSurface, textAlign: 'center', fontWeight: '700', fontSize: 16 }}>No sellers yet</Text>
+                <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 6 }}>Tap the + button below to add a buyer/seller.</Text>
+              </Card>
+            ) :
               sellers.map(sel => (
                 <Card key={sel.seller_id} testID={`seller-${sel.seller_id}`} style={{ marginBottom: 10 }}>
                   <Row title={sel.name} subtitle={sel.location || '—'} right={sel.contact || ''} colors={colors} />
@@ -205,10 +211,41 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showSellerForm, setShowSellerForm] = useState(false);
+  const [newSeller, setNewSeller] = useState({ name: '', contact: '', location: '' });
+  const [savingSeller, setSavingSeller] = useState(false);
   // Common fields for various sections
   const [f, setF] = useState<any>({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
 
-  React.useEffect(() => { if (visible) { setF({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' }); setErr(null); } }, [visible, section]);
+  React.useEffect(() => {
+    if (visible) {
+      setF({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
+      setErr(null);
+      setShowSellerForm(section === 'sales' && sellers.length === 0);
+      setNewSeller({ name: '', contact: '', location: '' });
+    }
+  }, [visible, section, sellers.length]);
+
+  const quickAddSeller = async () => {
+    if (!newSeller.name.trim()) { setErr('Seller name is required'); return; }
+    setSavingSeller(true); setErr(null);
+    try {
+      const created = await api('/sellers', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newSeller.name.trim(),
+          contact: newSeller.contact.trim() || null,
+          location: newSeller.location.trim() || null,
+        }),
+      });
+      await onSaved();
+      // Auto-select the newly created seller in the sale form
+      setF((s: any) => ({ ...s, seller_id: created.seller_id }));
+      setNewSeller({ name: '', contact: '', location: '' });
+      setShowSellerForm(false);
+    } catch (e: any) { setErr(e.message); }
+    finally { setSavingSeller(false); }
+  };
 
   const set = (k: string, v: any) => setF((s: any) => ({ ...s, [k]: v }));
 
@@ -267,9 +304,91 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
               <>
                 <Chips label="Produce*" options={produce.map((p: any) => p.name)} value={produce.find((p: any) => p.produce_id === f.produce_id)?.name}
                   onChange={(v: string) => { const p = produce.find((x: any) => x.name === v); set('produce_id', p?.produce_id); }} testIdPrefix="sale-produce" />
-                <Chips label="Seller*" options={sellers.map((s: any) => s.name)} value={sellers.find((s: any) => s.seller_id === f.seller_id)?.name}
-                  onChange={(v: string) => { const s = sellers.find((x: any) => x.name === v); set('seller_id', s?.seller_id); }} testIdPrefix="sale-seller" />
-                {sellers.length === 0 && <Text style={{ color: colors.warning, marginTop: 6 }}>Add a seller first (Sellers tab).</Text>}
+
+                <View style={{ marginTop: 12 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>Seller*</Text>
+                    <Pressable
+                      testID="sale-add-seller-toggle"
+                      onPress={() => setShowSellerForm(v => !v)}
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons name={showSellerForm ? 'close' : 'add'} size={14} color={colors.brand} />
+                      <Text style={{ color: colors.brand, fontWeight: '700', marginLeft: 4, fontSize: 13 }}>
+                        {showSellerForm ? 'Cancel' : 'Add new'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {sellers.length > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 2 }}>
+                      {sellers.map((sel: any) => {
+                        const selected = f.seller_id === sel.seller_id;
+                        return (
+                          <Pressable
+                            key={sel.seller_id}
+                            testID={`sale-seller-${sel.seller_id}`}
+                            onPress={() => set('seller_id', sel.seller_id)}
+                            style={{
+                              paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                              alignItems: 'center', justifyContent: 'center',
+                              backgroundColor: selected ? colors.brandPrimary : 'transparent',
+                              borderColor: selected ? colors.brandPrimary : colors.border,
+                            }}
+                          >
+                            <Text style={{ color: selected ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>{sel.name}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                  {sellers.length === 0 && !showSellerForm && (
+                    <Pressable
+                      testID="sale-empty-add-seller"
+                      onPress={() => setShowSellerForm(true)}
+                      style={{ marginTop: 4, padding: 12, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.brand, alignItems: 'center' }}
+                    >
+                      <Text style={{ color: colors.brand, fontWeight: '700' }}>+ Add your first seller</Text>
+                    </Pressable>
+                  )}
+                  {showSellerForm && (
+                    <View testID="inline-seller-form" style={{ marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>NEW SELLER</Text>
+                      <TextInput
+                        testID="seller-name-input"
+                        value={newSeller.name}
+                        onChangeText={(v) => setNewSeller(s => ({ ...s, name: v }))}
+                        placeholder="Seller name*"
+                        placeholderTextColor={colors.muted}
+                        style={{ backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: colors.onSurface, marginBottom: 8 }}
+                      />
+                      <TextInput
+                        testID="seller-contact-input"
+                        value={newSeller.contact}
+                        onChangeText={(v) => setNewSeller(s => ({ ...s, contact: v }))}
+                        placeholder="Contact (optional)"
+                        placeholderTextColor={colors.muted}
+                        style={{ backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: colors.onSurface, marginBottom: 8 }}
+                      />
+                      <TextInput
+                        testID="seller-location-input"
+                        value={newSeller.location}
+                        onChangeText={(v) => setNewSeller(s => ({ ...s, location: v }))}
+                        placeholder="Location (optional)"
+                        placeholderTextColor={colors.muted}
+                        style={{ backgroundColor: colors.surfaceSecondary, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: colors.onSurface, marginBottom: 10 }}
+                      />
+                      <Pressable
+                        testID="seller-save-inline"
+                        onPress={quickAddSeller}
+                        disabled={savingSeller}
+                        style={{ backgroundColor: colors.brandPrimary, paddingVertical: 12, borderRadius: 10, alignItems: 'center', opacity: savingSeller ? 0.6 : 1 }}
+                      >
+                        <Text style={{ color: colors.onBrandPrimary, fontWeight: '700' }}>{savingSeller ? 'Saving...' : 'Save Seller'}</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+
                 <Field label="Quantity*" testID="in-qty" value={f.quantity} onChangeText={(v: string) => set('quantity', v)} keyboardType="decimal-pad" />
                 <Field label="Rate per unit*" testID="in-rate" value={f.rate} onChangeText={(v: string) => set('rate', v)} keyboardType="decimal-pad" />
                 <Field label="Notes" testID="in-notes" value={f.notes} onChangeText={(v: string) => set('notes', v)} />
