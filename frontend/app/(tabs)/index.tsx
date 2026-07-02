@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { useAuth } from '@/src/auth/AuthContext';
 import { api } from '@/src/lib/api';
+import { fmt as _fmt, symbol } from '@/src/lib/currency';
 import { ScreenHeader, Card } from '@/src/ui/components';
 
 type Period = 'daily' | 'weekly' | 'monthly';
@@ -83,6 +84,15 @@ export default function Dashboard() {
               <StatCard label="Profit" value={`$${data?.profit ?? 0}`} accent={(data?.profit ?? 0) >= 0 ? colors.success : colors.error} testID="stat-profit" />
               <StatCard label="Avg Rate" value={`$${data?.avg_rate ?? 0}`} accent={colors.info} testID="stat-avg-rate" />
             </View>
+
+            {Object.keys(data?.revenue_by_currency || {}).length > 1 && (
+              <Card style={{ marginTop: 16 }} testID="card-revenue-currency">
+                <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>REVENUE BY CURRENCY</Text>
+                {Object.entries(data.revenue_by_currency).map(([k, v]: any, i, arr) => (
+                  <Row key={k} label={k} value={`${symbol(k)}${v}`} colors={colors} last={i === arr.length - 1} />
+                ))}
+              </Card>
+            )}
 
             <Card style={{ marginTop: 20 }} testID="card-quantities">
               <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 12 }}>QUANTITIES</Text>

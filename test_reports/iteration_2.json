@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration-2 backend + UI testing of FarmConnect stock-limit bug fix and currency-per-seller feature. Backend: 18/18 new pytests in test_stock_and_currency.py PASS + 26/26 non-assistant regression tests in test_farmconnect.py PASS. Verified (a) POST /api/sellers auto-detects currency INR/GBP/EUR/USD from location and returns null with no location; (b) PATCH /api/sellers/{id}/currency: 200 ok, 400 on bad code, 401 without token, 404 for non-owner; (c) POST /api/sales rejects with 400 when quantity > produce.quantity, rejects with 400 when seller has no currency ('Seller currency not set'), on success atomically decrements produce.quantity (verified 100→60→40→0 via GET /api/produce) and returns sale.currency, sale.produce_name, sale.seller_name populated; (d) after stock reaches 0 the next 1-unit sale is rejected; (e) GET /api/dashboard.revenue_by_currency correctly aggregates by currency (INR 1200+ / USD 100+). Frontend UI (mobile 390x844, injected fc_auth_token, deep-linked /farm/{id}): Record Sale modal — stock hint 'In stock: 100 kg' renders after produce selection; typing 999 turns the hint red (rgb(217,4,41)); selecting a seller with no currency shows the currency-picker chip row; picking INR + qty 40 + rate 30 shows total preview 'Total: ₹1,200'; submitting with over-stock qty keeps modal open (blocked); after successful save, reopening the modal for the same seller hides the picker and shows the locked-currency 'fixed for …' badge; sales list row correctly renders '₹1,200' and '₹30' rather than $. Regression: auth, farms, produce, sellers, sales, community, market subscribe/unsubscribe all still green. Old regression test for sellers had to be updated to include a location so currency is auto-set (aligned with new API contract). One backend static issue: seed_data_creation prefix TEST_ used and cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stock_and_currency.py",
+    "/app/backend/tests/test_farmconnect.py",
+    "/app/test_reports/pytest/pytest_iter2_stock_currency.xml",
+    "/app/test_reports/pytest/pytest_iter2_regression.xml"
+  ],
+  "action_items": [
+    "None blocking. Prior iteration-1 minor items (dead /api/auth/me stub was fixed elsewhere or still cosmetic; controlled/uncontrolled input warning; missing testID on AI chat send; shadow* on add-fab) remain optional cleanup — none impact iter-2 features."
+  ],
+  "critical_code_review_comments": [
+    "server.py POST /api/sales correctly does: quantity>0 check, rate>0 check, produce ownership+stock check, seller ownership+currency check, then atomic db.produce.update_one({'produce_id':..,'quantity':{'$gte':qty}},{'$inc':{'quantity':-qty}}) with a 409 fallback if a concurrent write beat it. Excellent race-safety.",
+    "detect_currency() is case-insensitive substring match with a good keyword list; UK/US/EU/India cases are correctly ordered so 'Punjab, India' → INR, 'London, UK' → GBP, 'Paris, France' → EUR (via 'paris' keyword), 'New York, USA' → USD. No false positives observed.",
+    "PATCH /api/sellers/{id}/currency: validates against CURRENCY_SYMBOLS whitelist (400) and uses matched_count==0 → 404, so non-owner can't distinguish existence — good.",
+    "Frontend farm/[id].tsx AddModal exposes clean testIDs: stock-hint, currency-picker, currency-opt-INR/USD/…, locked-currency, sale-total-preview, sale-produce-*, sale-seller-*. Easy to automate.",
+    "src/lib/currency.ts exports detectCurrency + symbol + fmt used throughout for consistent display. Good separation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stock_and_currency.py (created — 18 tests)",
+    "/app/backend/tests/test_farmconnect.py (updated: seller create now includes location so currency is auto-set for downstream sale test — aligned with new API contract)"
+  ],
+  "success_rate": {"backend": "100% (44/44: 18 new + 26 regression non-assistant)", "frontend": "100% on iter-2 features (stock hint, red-flag, picker, INR total, locked-currency, ₹ in list)"},
+  "seed_data_creation": "During pytest and Playwright, fresh farms/produce/sellers/sales prefixed TEST_ are created via the public URL and cleaned up (farm delete cascades to produce/sales/investments). Base user test@farm.com is reused (auto-registered if absent).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && python -m pytest backend/tests/ -v (skip AI tests with '-k \"not assistant\"' to avoid Emergent LLM flakiness). New tests live in backend/tests/test_stock_and_currency.py. Frontend uses localStorage key 'fc_auth_token' for JWT on web; deep link /farm/{id} works if that key is set. Sale modal exposes testIDs: sale-produce-<name>, sale-seller-<id>, stock-hint, currency-picker, currency-opt-<CODE>, locked-currency, sale-total-preview, in-qty, in-rate, modal-submit, modal-cancel.",
+  "rca_of_issue": "N/A — user-reported bug (over-selling) and feature (auto currency by location, one-time prompt per seller) are both correctly implemented in server.py + farm/[id].tsx + src/lib/currency.ts. Backend enforces the invariant server-side (atomic decrement + 400 on over-stock + 400 when seller currency missing). UI reinforces UX (stock hint, red-flag, picker only when needed, locked badge on subsequent sales)."
+}

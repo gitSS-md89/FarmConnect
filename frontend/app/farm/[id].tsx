@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/src/theme/ThemeContext';
 import { api } from '@/src/lib/api';
+import { fmt, symbol, detectCurrency, POPULAR_CURRENCIES, CURRENCY_SYMBOLS } from '@/src/lib/currency';
 import { ScreenHeader, Card, PrimaryButton } from '@/src/ui/components';
 
 type Tab = 'produce' | 'sales' | 'invest' | 'sellers';
@@ -44,7 +45,15 @@ export default function FarmDetail() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const totalRevenue = sales.reduce((a, s) => a + (s.total || 0), 0);
+  // Group sales revenue by currency
+  const revenueByCurrency: Record<string, number> = sales.reduce((acc: any, s: any) => {
+    const c = s.currency || 'USD';
+    acc[c] = (acc[c] || 0) + (s.total || 0);
+    return acc;
+  }, {});
+  const currencyKeys = Object.keys(revenueByCurrency);
+  const primaryCurrency = currencyKeys.length === 1 ? currencyKeys[0] : (currencyKeys[0] || 'USD');
+  const totalRevenuePrimary = revenueByCurrency[primaryCurrency] || 0;
   const totalInvest = invests.reduce((a, x) => a + (x.amount || 0), 0);
 
   const deleteFarm = async () => {
@@ -76,10 +85,27 @@ export default function FarmDetail() {
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <MiniStat label="Revenue" value={`$${totalRevenue.toFixed(2)}`} color={colors.brand} />
-          <MiniStat label="Invested" value={`$${totalInvest.toFixed(2)}`} color={colors.warning} />
-          <MiniStat label="Profit" value={`$${(totalRevenue - totalInvest).toFixed(2)}`} color={(totalRevenue - totalInvest) >= 0 ? colors.success : colors.error} />
+          <MiniStat
+            label={`Revenue${currencyKeys.length > 1 ? ' (' + primaryCurrency + ')' : ''}`}
+            value={fmt(totalRevenuePrimary, primaryCurrency)}
+            color={colors.brand}
+          />
+          <MiniStat label="Invested" value={fmt(totalInvest, 'USD')} color={colors.warning} />
+          <MiniStat
+            label="Profit"
+            value={currencyKeys.length > 1 ? 'Multi' : fmt(totalRevenuePrimary - totalInvest, primaryCurrency)}
+            color={(totalRevenuePrimary - totalInvest) >= 0 ? colors.success : colors.error}
+          />
         </View>
+        {currencyKeys.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 10 }}>
+            {currencyKeys.map(c => (
+              <View key={c} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderColor: colors.border, borderWidth: 1, backgroundColor: colors.surfaceTertiary }}>
+                <Text style={{ color: colors.onSurface, fontWeight: '600', fontSize: 12 }}>{c} {fmt(revenueByCurrency[c], c)}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 16, paddingBottom: 4 }}>
           {([
@@ -109,28 +135,32 @@ export default function FarmDetail() {
             {tab === 'produce' && (produce.length === 0 ? <Empty text="No produce yet" /> :
               produce.map(p => (
                 <Card key={p.produce_id} testID={`produce-${p.produce_id}`} style={{ marginBottom: 10 }}>
-                  <Row title={p.name} subtitle={p.category} right={`${p.quantity} ${p.unit}`} colors={colors} />
+                  <Row
+                    title={p.name}
+                    subtitle={p.category}
+                    right={`${p.quantity} ${p.unit}`}
+                    colors={colors}
+                  />
+                  {Number(p.quantity || 0) === 0 && (
+                    <Text testID={`out-of-stock-${p.produce_id}`} style={{ color: colors.error, fontSize: 12, marginTop: 6, fontWeight: '600' }}>Out of stock</Text>
+                  )}
                 </Card>
               )))}
             {tab === 'sales' && (sales.length === 0 ? <Empty text="No sales yet" /> :
-              sales.map(sale => {
-                const p = produce.find(x => x.produce_id === sale.produce_id);
-                const sel = sellers.find(x => x.seller_id === sale.seller_id);
-                return (
-                  <Card key={sale.sale_id} testID={`sale-${sale.sale_id}`} style={{ marginBottom: 10 }}>
-                    <Row
-                      title={`${p?.name || 'Produce'} → ${sel?.name || 'Seller'}`}
-                      subtitle={`${sale.quantity} × $${sale.rate}`}
-                      right={`$${sale.total}`}
-                      colors={colors}
-                    />
-                  </Card>
-                );
-              }))}
+              sales.map(sale => (
+                <Card key={sale.sale_id} testID={`sale-${sale.sale_id}`} style={{ marginBottom: 10 }}>
+                  <Row
+                    title={`${sale.produce_name || 'Produce'} → ${sale.seller_name || 'Seller'}`}
+                    subtitle={`${sale.quantity} × ${symbol(sale.currency)}${sale.rate}`}
+                    right={fmt(sale.total, sale.currency)}
+                    colors={colors}
+                  />
+                </Card>
+              )))}
             {tab === 'invest' && (invests.length === 0 ? <Empty text="No investments yet" /> :
               invests.map(i => (
                 <Card key={i.investment_id} testID={`invest-${i.investment_id}`} style={{ marginBottom: 10 }}>
-                  <Row title={i.category} subtitle={i.description || ''} right={`$${i.amount}`} colors={colors} />
+                  <Row title={i.category} subtitle={i.description || ''} right={fmt(i.amount, 'USD')} colors={colors} />
                 </Card>
               )))}
             {tab === 'sellers' && (sellers.length === 0 ? (
@@ -142,7 +172,19 @@ export default function FarmDetail() {
             ) :
               sellers.map(sel => (
                 <Card key={sel.seller_id} testID={`seller-${sel.seller_id}`} style={{ marginBottom: 10 }}>
-                  <Row title={sel.name} subtitle={sel.location || '—'} right={sel.contact || ''} colors={colors} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.onSurface, fontWeight: '700' }}>{sel.name}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>
+                        {sel.location || '—'}{sel.contact ? ` • ${sel.contact}` : ''}
+                      </Text>
+                    </View>
+                    {sel.currency && (
+                      <View testID={`seller-currency-${sel.seller_id}`} style={{ backgroundColor: colors.brandTertiary, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+                        <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>{sel.currency}</Text>
+                      </View>
+                    )}
+                  </View>
                 </Card>
               )))}
           </View>
@@ -214,6 +256,7 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
   const [showSellerForm, setShowSellerForm] = useState(false);
   const [newSeller, setNewSeller] = useState({ name: '', contact: '', location: '' });
   const [savingSeller, setSavingSeller] = useState(false);
+  const [currencyChoice, setCurrencyChoice] = useState<string | null>(null);
   // Common fields for various sections
   const [f, setF] = useState<any>({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
 
@@ -223,8 +266,26 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
       setErr(null);
       setShowSellerForm(section === 'sales' && sellers.length === 0);
       setNewSeller({ name: '', contact: '', location: '' });
+      setCurrencyChoice(null);
     }
   }, [visible, section, sellers.length]);
+
+  // Selected entities (for sale)
+  const selectedProduce = produce.find((p: any) => p.produce_id === f.produce_id);
+  const selectedSeller = sellers.find((sel: any) => sel.seller_id === f.seller_id);
+  const availableStock = selectedProduce ? Number(selectedProduce.quantity || 0) : null;
+  // Currency picker only when seller selected AND seller has no currency yet
+  const sellerCurrency = selectedSeller?.currency || null;
+  const needsCurrencyPick = !!selectedSeller && !sellerCurrency;
+  const suggestedCurrency = React.useMemo(
+    () => detectCurrency(selectedSeller?.location) || 'USD',
+    [selectedSeller?.location]
+  );
+  React.useEffect(() => {
+    if (needsCurrencyPick && !currencyChoice) setCurrencyChoice(suggestedCurrency);
+    if (!needsCurrencyPick) setCurrencyChoice(null);
+  }, [needsCurrencyPick, suggestedCurrency, currencyChoice]);
+  const effectiveCurrency = sellerCurrency || currencyChoice || 'USD';
 
   const quickAddSeller = async () => {
     if (!newSeller.name.trim()) { setErr('Seller name is required'); return; }
@@ -259,9 +320,22 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
         })});
       } else if (section === 'sales') {
         if (!f.produce_id || !f.seller_id || !f.quantity || !f.rate) throw new Error('Select produce, seller, quantity & rate');
+        const qty = parseFloat(f.quantity);
+        if (isNaN(qty) || qty <= 0) throw new Error('Quantity must be positive');
+        if (availableStock !== null && qty > availableStock) {
+          throw new Error(`Not enough stock. Available: ${availableStock} ${selectedProduce?.unit || 'units'}`);
+        }
+        // If seller has no currency yet, save it first (one-time)
+        if (needsCurrencyPick) {
+          if (!currencyChoice) throw new Error('Please pick a currency for this seller');
+          await api(`/sellers/${f.seller_id}/currency`, {
+            method: 'PATCH',
+            body: JSON.stringify({ currency: currencyChoice }),
+          });
+        }
         await api('/sales', { method: 'POST', body: JSON.stringify({
           farm_id: farmId, produce_id: f.produce_id, seller_id: f.seller_id,
-          quantity: parseFloat(f.quantity), rate: parseFloat(f.rate), notes: f.notes,
+          quantity: qty, rate: parseFloat(f.rate), notes: f.notes,
         })});
       } else if (section === 'invest') {
         if (!f.category || !f.amount) throw new Error('Category & amount are required');
@@ -390,7 +464,68 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
                 </View>
 
                 <Field label="Quantity*" testID="in-qty" value={f.quantity} onChangeText={(v: string) => set('quantity', v)} keyboardType="decimal-pad" />
-                <Field label="Rate per unit*" testID="in-rate" value={f.rate} onChangeText={(v: string) => set('rate', v)} keyboardType="decimal-pad" />
+                {selectedProduce && (
+                  <Text testID="stock-hint" style={{
+                    color: (parseFloat(f.quantity || '0') > (availableStock || 0)) ? colors.error : colors.muted,
+                    fontSize: 12, marginTop: 4, fontWeight: '600',
+                  }}>
+                    In stock: {availableStock} {selectedProduce.unit || 'units'}
+                    {parseFloat(f.quantity || '0') > (availableStock || 0) ? ' — exceeds available!' : ''}
+                  </Text>
+                )}
+
+                {selectedSeller && sellerCurrency && (
+                  <View testID="locked-currency" style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>Currency:</Text>
+                    <View style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.brandTertiary }}>
+                      <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>{sellerCurrency} ({symbol(sellerCurrency)})</Text>
+                    </View>
+                    <Text style={{ color: colors.muted, fontSize: 11, marginLeft: 8 }}>fixed for {selectedSeller.name}</Text>
+                  </View>
+                )}
+
+                {needsCurrencyPick && (
+                  <View testID="currency-picker" style={{ marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ color: colors.onSurface, fontWeight: '700', fontSize: 13 }}>
+                      Pick currency for {selectedSeller?.name}
+                    </Text>
+                    <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>
+                      Suggested from location{selectedSeller?.location ? ` "${selectedSeller.location}"` : ''}: {suggestedCurrency}. Saved once — won&apos;t ask again.
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 10, paddingBottom: 2 }}>
+                      {POPULAR_CURRENCIES.map(c => (
+                        <Pressable
+                          key={c}
+                          testID={`currency-opt-${c}`}
+                          onPress={() => setCurrencyChoice(c)}
+                          style={{
+                            paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, flexShrink: 0,
+                            alignItems: 'center', justifyContent: 'center',
+                            backgroundColor: currencyChoice === c ? colors.brandPrimary : colors.surfaceSecondary,
+                            borderColor: currencyChoice === c ? colors.brandPrimary : colors.border,
+                          }}
+                        >
+                          <Text style={{ color: currencyChoice === c ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>
+                            {CURRENCY_SYMBOLS[c]} {c}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
+                <Field
+                  label={`Rate per unit* (${symbol(effectiveCurrency)}${effectiveCurrency})`}
+                  testID="in-rate"
+                  value={f.rate}
+                  onChangeText={(v: string) => set('rate', v)}
+                  keyboardType="decimal-pad"
+                />
+                {!!f.quantity && !!f.rate && (
+                  <Text testID="sale-total-preview" style={{ color: colors.brand, marginTop: 6, fontWeight: '700' }}>
+                    Total: {fmt(parseFloat(f.quantity || '0') * parseFloat(f.rate || '0'), effectiveCurrency)}
+                  </Text>
+                )}
                 <Field label="Notes" testID="in-notes" value={f.notes} onChangeText={(v: string) => set('notes', v)} />
               </>
             )}

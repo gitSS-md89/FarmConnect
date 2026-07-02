@@ -147,9 +147,12 @@ class TestFarmFlow:
         TestFarmFlow.produce_id = d['produce_id']
 
     def test_create_seller(self, sess, H):
-        r = sess.post(f"{API}/sellers", headers=H, json={'name': 'TEST Mandi', 'contact': '999'})
+        # Provide location so currency is auto-detected (required for sale creation now)
+        r = sess.post(f"{API}/sellers", headers=H, json={'name': 'TEST Mandi', 'contact': '999', 'location': 'Punjab, India'})
         assert r.status_code == 200
-        TestFarmFlow.seller_id = r.json()['seller_id']
+        d = r.json()
+        assert d.get('currency') == 'INR'
+        TestFarmFlow.seller_id = d['seller_id']
 
     def test_list_sellers(self, sess, H):
         r = sess.get(f"{API}/sellers", headers=H)

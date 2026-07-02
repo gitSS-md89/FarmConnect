@@ -121,6 +121,10 @@ class SellerIn(BaseModel):
     name: str
     contact: Optional[str] = None
     location: Optional[str] = None
+    currency: Optional[str] = None  # ISO 4217 code, e.g. USD, INR
+
+class SellerCurrencyIn(BaseModel):
+    currency: str
 
 class SaleIn(BaseModel):
     farm_id: str
@@ -144,6 +148,75 @@ class ChatIn(BaseModel):
     session_id: Optional[str] = None
     message: str
     image_base64: Optional[str] = None  # base64 with or without data URL prefix
+
+# ==================== Currency ====================
+
+# ISO code → symbol
+CURRENCY_SYMBOLS = {
+    "USD": "$", "INR": "₹", "EUR": "€", "GBP": "£", "JPY": "¥",
+    "CNY": "¥", "AUD": "A$", "CAD": "C$", "SGD": "S$", "AED": "AED ",
+    "BRL": "R$", "ZAR": "R", "MXN": "MX$", "NGN": "₦", "KES": "KSh",
+    "PKR": "₨", "BDT": "৳", "LKR": "Rs", "NPR": "₨", "IDR": "Rp",
+    "MYR": "RM", "THB": "฿", "PHP": "₱", "VND": "₫", "CHF": "CHF ",
+    "SEK": "kr", "NOK": "kr", "DKK": "kr", "PLN": "zł", "TRY": "₺",
+    "RUB": "₽", "SAR": "SAR ", "EGP": "E£", "GHS": "GH₵",
+}
+
+# location keyword → currency
+LOCATION_TO_CURRENCY = [
+    (["india", "delhi", "mumbai", "bangalore", "bengaluru", "kolkata", "chennai", "hyderabad",
+      "pune", "ahmedabad", "punjab", "haryana", "kerala", "karnataka", "maharashtra", "gujarat",
+      "rajasthan", "uttar pradesh", "up", "bihar", "west bengal", "tamil nadu", "andhra"], "INR"),
+    (["usa", "united states", "america", "us ", "u.s.", "new york", "california", "texas",
+      "florida", "washington", "chicago", "boston", "seattle", "los angeles"], "USD"),
+    (["uk", "united kingdom", "england", "britain", "london", "manchester", "scotland", "wales"], "GBP"),
+    (["euro", "germany", "france", "spain", "italy", "netherlands", "belgium", "portugal",
+      "ireland", "austria", "greece", "finland", "berlin", "paris", "madrid", "rome"], "EUR"),
+    (["japan", "tokyo", "osaka"], "JPY"),
+    (["china", "shanghai", "beijing", "shenzhen", "guangzhou"], "CNY"),
+    (["australia", "sydney", "melbourne", "brisbane"], "AUD"),
+    (["canada", "toronto", "vancouver", "montreal", "ottawa"], "CAD"),
+    (["singapore"], "SGD"),
+    (["uae", "dubai", "abu dhabi", "emirates"], "AED"),
+    (["brazil", "sao paulo", "rio"], "BRL"),
+    (["south africa", "johannesburg", "cape town"], "ZAR"),
+    (["mexico", "mexico city"], "MXN"),
+    (["nigeria", "lagos", "abuja"], "NGN"),
+    (["kenya", "nairobi"], "KES"),
+    (["pakistan", "karachi", "lahore", "islamabad"], "PKR"),
+    (["bangladesh", "dhaka"], "BDT"),
+    (["sri lanka", "colombo"], "LKR"),
+    (["nepal", "kathmandu"], "NPR"),
+    (["indonesia", "jakarta"], "IDR"),
+    (["malaysia", "kuala lumpur"], "MYR"),
+    (["thailand", "bangkok"], "THB"),
+    (["philippines", "manila"], "PHP"),
+    (["vietnam", "hanoi", "ho chi minh"], "VND"),
+    (["switzerland", "zurich", "geneva"], "CHF"),
+    (["sweden", "stockholm"], "SEK"),
+    (["norway", "oslo"], "NOK"),
+    (["denmark", "copenhagen"], "DKK"),
+    (["poland", "warsaw"], "PLN"),
+    (["turkey", "istanbul", "ankara"], "TRY"),
+    (["russia", "moscow"], "RUB"),
+    (["saudi", "riyadh", "jeddah"], "SAR"),
+    (["egypt", "cairo"], "EGP"),
+    (["ghana", "accra"], "GHS"),
+]
+
+def detect_currency(location: Optional[str]) -> Optional[str]:
+    if not location:
+        return None
+    low = location.lower()
+    for keywords, code in LOCATION_TO_CURRENCY:
+        for kw in keywords:
+            if kw in low:
+                return code
+    return None
+
+@api_router.get('/currencies')
+async def list_currencies():
+    return [{"code": c, "symbol": s} for c, s in CURRENCY_SYMBOLS.items()]
 
 # ==================== Startup ====================
 
@@ -325,17 +398,34 @@ async def delete_produce(produce_id: str, authorization: Optional[str] = Header(
 @api_router.post('/sellers')
 async def create_seller(body: SellerIn, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    currency = (body.currency or detect_currency(body.location))
     doc = {
         "seller_id": uid('s'),
         "owner_id": user['user_id'],
         "name": body.name,
         "contact": body.contact,
         "location": body.location,
+        "currency": currency,
+        "currency_detected": detect_currency(body.location),
         "created_at": now_utc(),
     }
     await db.sellers.insert_one(doc)
     doc.pop('_id', None)
     return doc
+
+@api_router.patch('/sellers/{seller_id}/currency')
+async def set_seller_currency(seller_id: str, body: SellerCurrencyIn, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if body.currency not in CURRENCY_SYMBOLS:
+        raise HTTPException(400, 'Unsupported currency')
+    r = await db.sellers.update_one(
+        {"seller_id": seller_id, "owner_id": user['user_id']},
+        {"$set": {"currency": body.currency}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, 'Seller not found')
+    seller = await db.sellers.find_one({"seller_id": seller_id}, {"_id": 0})
+    return seller
 
 @api_router.get('/sellers')
 async def list_sellers(authorization: Optional[str] = Header(None)):
@@ -348,15 +438,52 @@ async def list_sellers(authorization: Optional[str] = Header(None)):
 @api_router.post('/sales')
 async def create_sale(body: SaleIn, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    if body.quantity <= 0:
+        raise HTTPException(400, 'Quantity must be positive')
+    if body.rate <= 0:
+        raise HTTPException(400, 'Rate must be positive')
+    # Fetch produce for stock check + ownership
+    prod = await db.produce.find_one(
+        {"produce_id": body.produce_id, "owner_id": user['user_id'], "farm_id": body.farm_id},
+        {"_id": 0},
+    )
+    if not prod:
+        raise HTTPException(404, 'Produce not found for this farm')
+    available = float(prod.get('quantity', 0) or 0)
+    if body.quantity > available:
+        raise HTTPException(400, f"Not enough stock. Available: {available} {prod.get('unit','')}, requested: {body.quantity}")
+    # Fetch seller
+    seller = await db.sellers.find_one(
+        {"seller_id": body.seller_id, "owner_id": user['user_id']},
+        {"_id": 0},
+    )
+    if not seller:
+        raise HTTPException(404, 'Seller not found')
+    if not seller.get('currency'):
+        raise HTTPException(400, 'Seller currency not set. Set seller currency first.')
+    currency = seller['currency']
+
+    # Atomically decrement stock (guard against race)
+    r = await db.produce.update_one(
+        {"produce_id": body.produce_id, "quantity": {"$gte": body.quantity}},
+        {"$inc": {"quantity": -body.quantity}},
+    )
+    if r.modified_count == 0:
+        raise HTTPException(409, 'Stock changed. Please retry.')
+
     doc = {
         "sale_id": uid('sl'),
         "owner_id": user['user_id'],
         "farm_id": body.farm_id,
         "produce_id": body.produce_id,
+        "produce_name": prod.get('name'),
+        "produce_unit": prod.get('unit'),
         "seller_id": body.seller_id,
+        "seller_name": seller.get('name'),
         "quantity": body.quantity,
         "rate": body.rate,
         "total": round(body.quantity * body.rate, 2),
+        "currency": currency,
         "notes": body.notes,
         "sold_at": now_utc(),
     }
@@ -439,6 +566,12 @@ async def dashboard(period: Literal['daily', 'weekly', 'monthly'] = 'monthly',
         c = i.get('category', 'Other')
         invest_by_cat[c] = round(invest_by_cat.get(c, 0) + i.get('amount', 0), 2)
 
+    # Revenue by currency
+    revenue_by_currency: dict = {}
+    for s in sales:
+        cur = s.get('currency') or 'USD'
+        revenue_by_currency[cur] = round(revenue_by_currency.get(cur, 0) + s.get('total', 0), 2)
+
     return {
         "period": period,
         "total_revenue": round(total_revenue, 2),
@@ -449,6 +582,7 @@ async def dashboard(period: Literal['daily', 'weekly', 'monthly'] = 'monthly',
         "avg_rate": avg_rate,
         "sales_by_category": by_category,
         "investment_by_category": invest_by_cat,
+        "revenue_by_currency": revenue_by_currency,
         "sales_count": len(sales),
         "produce_count": len(produce),
     }
