@@ -16,21 +16,29 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
 
+import time
+from collections import defaultdict, deque
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # ---- Config ----
 MONGO_URL = os.environ['MONGO_URL']
 DB_NAME = os.environ['DB_NAME']
-JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
+JWT_SECRET = os.environ['JWT_SECRET']  # required — fail closed if missing
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 JWT_ALGO = 'HS256'
-JWT_TTL_DAYS = 30
+JWT_TTL_DAYS = 7  # shortened from 30
+
+# ---- Payload caps ----
+MAX_TEXT = 4000
+MAX_NAME = 200
+MAX_B64_IMAGE = 2_500_000  # ~1.8 MB decoded
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
-app = FastAPI(title='FarmConnect API')
+app = FastAPI(title='Farm Hand API')
 api_router = APIRouter(prefix="/api")
 
 # ==================== Helpers ====================
@@ -50,9 +58,37 @@ def verify_password(pw: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def make_jwt(user_id: str) -> str:
+# ---- Rate limiting (in-memory sliding window) ----
+_RL_BUCKETS: dict = defaultdict(deque)
+
+def rate_limit(key: str, max_calls: int, window_seconds: int):
+    """Raise 429 if the key exceeded max_calls within the window."""
+    now = time.monotonic()
+    dq = _RL_BUCKETS[key]
+    cutoff = now - window_seconds
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    if len(dq) >= max_calls:
+        retry = int(window_seconds - (now - dq[0])) + 1
+        raise HTTPException(status_code=429, detail=f"Too many requests. Retry in {retry}s.")
+    dq.append(now)
+
+async def daily_quota(user_id: str, feature: str, limit: int):
+    """Persistent per-user daily counter; raise 429 when exceeded."""
+    today = now_utc().strftime('%Y-%m-%d')
+    key = f"{user_id}:{feature}:{today}"
+    doc = await db.rate_quotas.find_one_and_update(
+        {"key": key},
+        {"$inc": {"count": 1}, "$setOnInsert": {"created_at": now_utc()}},
+        upsert=True, return_document=True,
+    )
+    if doc and doc.get('count', 0) > limit:
+        raise HTTPException(status_code=429, detail=f"Daily {feature} limit ({limit}) reached. Try again tomorrow.")
+
+def make_jwt(user_id: str, token_version: int) -> str:
     payload = {
         "sub": user_id,
+        "tv": token_version,
         "exp": now_utc() + timedelta(days=JWT_TTL_DAYS),
         "iat": now_utc(),
         "type": "jwt",
@@ -63,12 +99,20 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.lower().startswith('bearer '):
         raise HTTPException(status_code=401, detail='Not authenticated')
     token = authorization.split(' ', 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail='Not authenticated')
     # Try JWT first
     try:
         payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
         user = await db.users.find_one({"user_id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if user:
+            expected_tv = int(user.get('token_version', 1))
+            claim_tv = int(payload.get('tv', 0))
+            if claim_tv != expected_tv:
+                raise HTTPException(status_code=401, detail='Token revoked')
             return user
+    except HTTPException:
+        raise
     except Exception:
         pass
     # Try Emergent session_token
@@ -89,83 +133,83 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str
-    name: str
+    password: str = Field(..., min_length=8, max_length=128)
+    name: str = Field(..., min_length=1, max_length=MAX_NAME)
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=128)
 
 class AuthOut(BaseModel):
     token: str
     user: dict
 
 class GoogleSessionIn(BaseModel):
-    session_id: str
+    session_id: str = Field(..., min_length=1, max_length=1024)
 
 class FarmIn(BaseModel):
-    name: str
-    location: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=MAX_NAME)
+    location: Optional[str] = Field(None, max_length=MAX_NAME)
     size_acres: Optional[float] = None
-    description: Optional[str] = None
-    currency: Optional[str] = None       # override auto-detect
-    default_unit: Optional[str] = None   # override auto-detect
+    description: Optional[str] = Field(None, max_length=MAX_TEXT)
+    currency: Optional[str] = Field(None, max_length=8)
+    default_unit: Optional[str] = Field(None, max_length=24)
 
 class FarmUpdateIn(BaseModel):
-    name: Optional[str] = None
-    location: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=MAX_NAME)
+    location: Optional[str] = Field(None, max_length=MAX_NAME)
     size_acres: Optional[float] = None
-    description: Optional[str] = None
-    currency: Optional[str] = None
-    default_unit: Optional[str] = None
-    logo: Optional[str] = None  # base64 image
+    description: Optional[str] = Field(None, max_length=MAX_TEXT)
+    currency: Optional[str] = Field(None, max_length=8)
+    default_unit: Optional[str] = Field(None, max_length=24)
+    logo: Optional[str] = Field(None, max_length=MAX_B64_IMAGE)
 
 class UserSettingsIn(BaseModel):
-    primary_currency: Optional[str] = None
-    picture: Optional[str] = None          # base64 image (with or without data URL prefix)
-    background_image: Optional[str] = None # base64 image; empty string clears back to default
+    primary_currency: Optional[str] = Field(None, max_length=8)
+    picture: Optional[str] = Field(None, max_length=MAX_B64_IMAGE)
+    background_image: Optional[str] = Field(None, max_length=MAX_B64_IMAGE)
 
 class ProduceIn(BaseModel):
-    farm_id: str
-    name: str
-    category: str  # e.g. Grain, Vegetable, Fruit, Dairy
+    farm_id: str = Field(..., max_length=64)
+    name: str = Field(..., min_length=1, max_length=MAX_NAME)
+    category: str = Field(..., min_length=1, max_length=64)
     quantity: float
-    unit: Optional[str] = None  # inherits farm.default_unit if None
+    unit: Optional[str] = Field(None, max_length=24)
     low_stock_threshold: Optional[float] = 0
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=MAX_TEXT)
 
 class SellerIn(BaseModel):
-    name: str
-    contact: Optional[str] = None
-    location: Optional[str] = None
-    currency: Optional[str] = None  # ISO 4217 code, e.g. USD, INR
+    name: str = Field(..., min_length=1, max_length=MAX_NAME)
+    contact: Optional[str] = Field(None, max_length=MAX_NAME)
+    location: Optional[str] = Field(None, max_length=MAX_NAME)
+    currency: Optional[str] = Field(None, max_length=8)
 
 class SellerCurrencyIn(BaseModel):
-    currency: str
+    currency: str = Field(..., max_length=8)
 
 class SaleIn(BaseModel):
-    farm_id: str
-    produce_id: str
-    seller_id: str
+    farm_id: str = Field(..., max_length=64)
+    produce_id: str = Field(..., max_length=64)
+    seller_id: str = Field(..., max_length=64)
     quantity: float
     rate: float  # per unit
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=MAX_TEXT)
 
 class InvestmentIn(BaseModel):
-    farm_id: str
-    category: str  # Seeds, Fertilizer, Labour, Equipment, Irrigation, Other
+    farm_id: str = Field(..., max_length=64)
+    category: str = Field(..., min_length=1, max_length=64)
     amount: float
-    currency: Optional[str] = None  # defaults to farm's currency
-    description: Optional[str] = None
+    currency: Optional[str] = Field(None, max_length=8)
+    description: Optional[str] = Field(None, max_length=MAX_TEXT)
 
 class PostIn(BaseModel):
-    content: str
-    image_base64: Optional[str] = None
+    content: str = Field(..., min_length=1, max_length=MAX_TEXT)
+    image_base64: Optional[str] = Field(None, max_length=MAX_B64_IMAGE)
 
 class ChatIn(BaseModel):
-    session_id: Optional[str] = None
-    message: str
-    image_base64: Optional[str] = None  # base64 with or without data URL prefix
+    session_id: Optional[str] = Field(None, max_length=128)
+    message: str = Field(..., min_length=1, max_length=MAX_TEXT)
+    image_base64: Optional[str] = Field(None, max_length=MAX_B64_IMAGE)
 
 # ==================== Currency ====================
 
@@ -287,14 +331,23 @@ async def startup():
     await db.produce.create_index("farm_id")
     await db.sales.create_index([("farm_id", 1), ("sold_at", -1)])
     await db.investments.create_index([("farm_id", 1), ("invested_at", -1)])
+    await db.rate_quotas.create_index("key", unique=True)
+    await db.rate_quotas.create_index("created_at", expireAfterSeconds=48 * 3600)
+    # Migration: ensure every existing user has token_version
+    await db.users.update_many(
+        {"token_version": {"$exists": False}},
+        {"$set": {"token_version": 1}},
+    )
 
 # ==================== Auth ====================
 
 @api_router.post('/auth/register', response_model=AuthOut)
-async def register(body: RegisterIn):
+async def register(request: Request, body: RegisterIn):
+    ip = request.client.host if request.client else 'unknown'
+    rate_limit(f"register:{ip}", max_calls=5, window_seconds=3600)
     existing = await db.users.find_one({"email": body.email.lower()})
     if existing:
-        raise HTTPException(400, 'Email already registered')
+        raise HTTPException(400, 'Registration failed')  # neutral (no enum leak)
     user_id = uid('u')
     doc = {
         "user_id": user_id,
@@ -304,20 +357,26 @@ async def register(body: RegisterIn):
         "provider": "email",
         "picture": None,
         "primary_currency": "USD",
+        "token_version": 1,
         "subscription": {"active": False, "plan": None, "renews_at": None},
         "created_at": now_utc(),
     }
     await db.users.insert_one(doc)
-    token = make_jwt(user_id)
+    token = make_jwt(user_id, 1)
     user = {k: v for k, v in doc.items() if k not in ('password_hash', '_id')}
     return {"token": token, "user": user}
 
 @api_router.post('/auth/login', response_model=AuthOut)
-async def login(body: LoginIn):
-    user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
+async def login(request: Request, body: LoginIn):
+    ip = request.client.host if request.client else 'unknown'
+    email_key = body.email.lower()
+    rate_limit(f"login:{ip}", max_calls=10, window_seconds=900)          # 10 attempts / 15 min per IP
+    rate_limit(f"login-email:{email_key}", max_calls=8, window_seconds=900)  # 8 per email / 15 min
+    user = await db.users.find_one({"email": email_key}, {"_id": 0})
     if not user or not user.get('password_hash') or not verify_password(body.password, user['password_hash']):
         raise HTTPException(401, 'Invalid email or password')
-    token = make_jwt(user['user_id'])
+    tv = int(user.get('token_version', 1))
+    token = make_jwt(user['user_id'], tv)
     user_out = {k: v for k, v in user.items() if k != 'password_hash'}
     return {"token": token, "user": user_out}
 
@@ -351,6 +410,7 @@ async def google_session(body: GoogleSessionIn):
             "provider": "google",
             "password_hash": None,
             "primary_currency": "USD",
+            "token_version": 1,
             "subscription": {"active": False, "plan": None, "renews_at": None},
             "created_at": now_utc(),
         })
@@ -371,9 +431,17 @@ async def get_me(authorization: Optional[str] = Header(None)):
 
 @api_router.post('/auth/logout')
 async def logout(authorization: Optional[str] = Header(None)):
-    if authorization and authorization.lower().startswith('bearer '):
-        token = authorization.split(' ', 1)[1].strip()
-        await db.user_sessions.delete_one({"session_token": token})
+    if not authorization or not authorization.lower().startswith('bearer '):
+        return {"ok": True}
+    token = authorization.split(' ', 1)[1].strip()
+    # Try to identify user via JWT; if valid, bump token_version to revoke all JWTs
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        await db.users.update_one({"user_id": payload.get("sub")}, {"$inc": {"token_version": 1}})
+    except Exception:
+        pass
+    # Also drop the Emergent OAuth session if this was a session_token
+    await db.user_sessions.delete_one({"session_token": token})
     return {"ok": True}
 
 @api_router.patch('/users/me/settings')
@@ -743,6 +811,10 @@ async def assistant_chat(body: ChatIn, authorization: Optional[str] = Header(Non
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, 'AI key not configured')
 
+    # Rate limit: 10 messages / minute, 100 / day
+    rate_limit(f"chat:{user['user_id']}", max_calls=10, window_seconds=60)
+    await daily_quota(user['user_id'], 'assistant_chat', 100)
+
     session_id = body.session_id or uid('chat')
     # Save user message
     await db.chat_messages.insert_one({
@@ -911,10 +983,14 @@ async def root():
 
 app.include_router(api_router)
 
+# CORS: since the client uses bearer tokens (no cookies), allow_credentials must be False
+# so wildcard origins remain safe. Set FRONTEND_ORIGINS env (comma-separated) to lock down further.
+_allowed_origins_env = os.environ.get('FRONTEND_ORIGINS', '').strip()
+_allowed_origins = [o.strip() for o in _allowed_origins_env.split(',') if o.strip()] if _allowed_origins_env else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
+    allow_credentials=False,
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
