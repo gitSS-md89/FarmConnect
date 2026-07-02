@@ -151,7 +151,6 @@ export default function FarmDetail() {
           backgroundColor: colors.brandPrimary,
           width: 56, height: 56, borderRadius: 28,
           alignItems: 'center', justifyContent: 'center',
-          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
           elevation: 4,
         }}
       >
@@ -207,9 +206,9 @@ function AddModal({ visible, section, onClose, farmId, produce, sellers, onSaved
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Common fields for various sections
-  const [f, setF] = useState<any>({});
+  const [f, setF] = useState<any>({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' });
 
-  React.useEffect(() => { if (visible) { setF({}); setErr(null); } }, [visible, section]);
+  React.useEffect(() => { if (visible) { setF({ name: '', quantity: '', unit: '', notes: '', category: '', rate: '', amount: '', description: '', contact: '', location: '', produce_id: '', seller_id: '' }); setErr(null); } }, [visible, section]);
 
   const set = (k: string, v: any) => setF((s: any) => ({ ...s, [k]: v }));
 

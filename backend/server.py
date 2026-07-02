@@ -232,13 +232,8 @@ async def google_session(body: GoogleSessionIn):
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
     return {"token": session_token, "user": user}
 
-@api_router.get('/auth/me')
-async def me(user=None):
-    # dependency workaround
-    pass
-
 @api_router.get('/me')
-async def get_me(user: dict = None, authorization: Optional[str] = Header(None)):
+async def get_me(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     return user
 
@@ -525,8 +520,19 @@ async def assistant_chat(body: ChatIn, authorization: Optional[str] = Header(Non
             file_contents = [ImageContent(image_base64=b64)]
 
         msg = UserMessage(text=full_message, file_contents=file_contents) if file_contents else UserMessage(text=full_message)
-        reply = await chat.send_message(msg)
-        reply_text = str(reply)
+
+        # Single retry for transient LLM errors
+        reply_text = None
+        last_err = None
+        for _attempt in range(2):
+            try:
+                reply = await chat.send_message(msg)
+                reply_text = str(reply)
+                break
+            except Exception as inner:
+                last_err = inner
+        if reply_text is None:
+            raise last_err if last_err else RuntimeError('LLM failed')
     except Exception as e:
         logging.exception('assistant error')
         raise HTTPException(500, f'AI error: {str(e)[:200]}')
